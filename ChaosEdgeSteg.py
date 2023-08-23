@@ -82,7 +82,7 @@ class ChaosEdgeSteg:
 
     def detect_edges(self, image):
 
-        # Convert the filtered image to grayscale
+        # Convert the image to grayscale
         gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         self.gray_img = gray_img
 
