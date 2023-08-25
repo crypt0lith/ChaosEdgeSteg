@@ -1,7 +1,8 @@
 # ChaosEdgeSteg
 Chaos-Based Edge Adaptive Steganography Tool
 
-![chaosedgesteg_shellview](https://github.com/crypt0lith/ChaosEdgeSteg/assets/118923461/952da483-066d-430a-a186-40f3116cbff5)
+![chaosedgesteg_shellview](https://github.com/crypt0lith/ChaosEdgeSteg/assets/118923461/731142d7-be35-4b16-9eb8-76ff947b3348)
+
 
 
 ## Introduction
