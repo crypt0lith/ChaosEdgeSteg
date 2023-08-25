@@ -1,2 +1,3 @@
 opencv-python~=4.8.0.74
 numpy~=1.25.2
+colorama~=0.4.6

@@ -6,6 +6,9 @@ from collections import Counter
 
 import cv2
 import numpy as np
+from colorama import init, Fore, Back
+
+init(autoreset=True)
 
 
 class SteganographyError(Exception):
@@ -283,41 +286,41 @@ def extract_action(args):
 
 
 def main_cli():
-    __header__ = '''
-\033[91m                       ,,                 .             ....               
-\033[91m               .,,,,,  s     .           ...          ..;;;...  .....          
-\033[91m          ......      .s     .s.        ..;..       ..;;sss;;..   ......       
-\033[91m        ..iii         SS      s$.       .;;;.       .ss     Ss.   ;;;;;;;.     
-\033[91m      .llll          .$S      .$$      .;;$;;.     .ss       ss  ;;$$$SSSeee;; 
-\033[91m    ..7l$l           .$S       .$$     .;$;$;.    .;$        S$. ;$$      $;;  
-\033[91m   ..77$$l          .;$*       .$$    .;$$*$;;.   .S$        S;; ;$$           
-\033[91m ..ps$$$$           .;$$       .$$    .$$* *$;.   ;S$        S$; ;;$           
-\033[91m ;sXSf$$$           .;$$       $$$   .;$*   *;;.  ;S$        S$;  ;;$          
-\033[91m si`7f$$$           .;$$*....$$$$$  .;$*******;;. .S$        S$;   ;;$.        
-\033[91m F  .>$$s         ..Stt=====$$tt$$  .S$S3.3.3S$S.  ;$s       S$;;   ;;$    .   
-\033[91m    .$$$$      ....ZZ;;tttPPPPSS$$ ..$$       $$.. .;Ss      S$.;;  .;$$   .   
-\033[91m    .s$$$s   ...;ZZZ ???       *$s .S$.        $S.   $SSs   sS$ $;;;;;x$$ ..   
-\033[91m    .ss$$Ss...;;;ZZ  ?ll       *$. .S          $S.    ;$ssssSS; $$$$$XX$$$..   
-\033[91m    ..ss$$$$lllZZ/   $ll       *s  sS           Ss     .$$$$$.     \$$$$$$.$.  
-\033[91m     .sss$$$$fff/    .;l      s*s  s.            ;      s;';s       .\XX$$$$;  
-\033[91m      ssSSSXii/       ;$      s*   ;.            ;      ;   ;         $xX$$Z;  
-\033[91m      .sSSS.           ;      *    ;             ;      ;   ;          $$ZZZo. 
-\033[91m      .sSS.            ;      ;    ;             ;      ;   ;           .xXx;. 
-\033[91m     ..sSl             .      .    ;             ;      ;   ;           .\V$;. 
-\033[91m     ..SSl             .      .    .             .      ;   .            .SS;. 
-\033[91m     .;Sl;             .      .    .             .      .   .            .IS;. 
-\033[91m    ..Sl..........\033[0m................................................\033[91m.........S;. 
-\033[91m    .;Sl;         \033[0m`##############################################`        \033[91m.lS. 
-\033[91m    .SSl          \033[0m`##############################################`         \033[91mll. 
-\033[91m    .Sl.          \033[0m`###\033[91m/ __/\033[0m###\033[91m/ /\033[0m###########\033[91m/ __// /\033[0m#############`         \033[91m.l. 
-\033[91m    .S............\033[0m`##\033[91m/ _/ / _  // _ `// -_) \ \ / __// -_)/ _ `/\033[0m#`\033[91m..........l. 
-\033[91m    .l1           \033[0m`#\033[91m/___/ \_,_/ \_, / \__//___/ \__/ \__/ \_, /\033[0m##`         \033[91m.l. 
-\033[91m    .l;           \033[0m`############\033[91m/___/\033[0m#####################\033[91m/___/\033[0m###`         \033[91m.i. 
-\033[91m    .l;           \033[0m`##############################################`         \033[91m.i. 
-\033[91m     ;.           \033[0m`##############################################`         \033[91m.i  
-\033[91m     ..```````````\033[0m````````````````````````````````````\033[90mcrypt0lith\033[0m``\033[91m`````````..  
-\033[91m     .             Chaos-Based Edge Adaptive Steganography Tool             .  
-\033[0m
+    __header__ = f'''
+{Fore.RED}                       .    .             .             ...               
+{Fore.RED}             ,.....    ;     .           ...          ..;;;..   .....          
+{Fore.RED}          .;i         .s     .s.        ..;..       ,ji&OOoq;.   ......       
+{Fore.RED}        .jil          SS      s$.       .;;;.       g!'     %S.   ;;;;;;;.     
+{Fore.RED}      .ll$l          .$S      .s$.     .;;$;;.     ;$        $s  ;b@$$SSijc. 
+{Fore.RED}    ..7l$l           .$S       ;$S     .;$@$;.    .s$        S$. ;K       `s;  
+{Fore.RED}   ..77$S           .;$*       ;$$    .;$$*$$;.   .S$        S$; :B         '   
+{Fore.RED} ..ps$$$S           .;$l       i$$    .$$* *$$.   ;S$        S$; ;;$           
+{Fore.RED} ;sXSf$$s           .s$$      .$$$   .;$*   *$;.  ;S$        S$;  ;;$          
+{Fore.RED} si`7f$$s           sS$$*...+*$$$$  .;$*******$;. .S$        S$.   ;;$.        
+{Fore.RED} F  .>$$s          jyXF====##@@$$$  .S$##333##$S.  ;$s       S$;*.  ;*$    .   
+{Fore.RED}    .$$$S        ;iZ ?&ttfPPPPQ$$$ ..$$       $$.. .lSs      S$.zS. .!$$   .   
+{Fore.RED}    .s$$$s     .sZZ  ???       *$s .S$         $S.   $$S,   ;S$ sHl:.;x$$  :   
+{Fore.RED}    .ss$$Ss...;d$Z   ?li       *$. .S           S.    ;$@@sS$$; 'S$$$XX#$$.!   
+{Fore.RED}    ..ss@@@#GS$Z/    ;ll      .S.  sS           Ss     .SSSSS.     \$$$@@$;S.  
+{Fore.RED}     .ssS&&#$ff/     .;l      ;s   s.            ;      s;  s       .\X$$$Ss;  
+{Fore.RED}      ssSSSXF/`       ;!      s    ;.            ;      ;   ;          xXSsZ,  
+{Fore.RED}      .sSS27.          ;      *    ;             ;      ;   ;          .l5Zz. 
+{Fore.RED}      .sSS4            ;      ;    ;             ;      ;   ;           .xXx;. 
+{Fore.RED}     ..sSi;            .      .    ;             ;      ;   ;           .\VS;. 
+{Fore.RED}     ..SSl             .      .    .             .      ;   .            .SS;. 
+{Fore.RED}     .;Sl;             .      .    .             .      .   .            .IS;. 
+{Fore.RED}    ..Sl..........{Fore.WHITE}................................................{Fore.RED}.........S;. 
+{Fore.RED}    .;Sl;         {Fore.WHITE}`##############################################`        {Fore.RED}.lS. 
+{Fore.RED}    .SSl          {Fore.WHITE}`##############################################`         {Fore.RED}ll. 
+{Fore.RED}    .Sl.          {Fore.WHITE}`###{Fore.RED}/ __/{Fore.WHITE}###{Fore.RED}/ /{Fore.WHITE}###########{Fore.RED}/ __// /{Fore.WHITE}#############`         {Fore.RED}.l. 
+{Fore.RED}    .Si...........{Fore.WHITE}`##{Fore.RED}/ _/ / _  // _ `// -_) \ \ / __// -_)/ _ `/{Fore.WHITE}#`{Fore.RED}..........l. 
+{Fore.RED}    .l1           {Fore.WHITE}`#{Fore.RED}/___/ \_,_/ \_, / \__//___/ \__/ \__/ \_, /{Fore.WHITE}##`         {Fore.RED}.l. 
+{Fore.RED}    .l;           {Fore.WHITE}`############{Fore.RED}/___/{Fore.WHITE}#####################{Fore.RED}/___/{Fore.WHITE}###`         {Fore.RED}.i. 
+{Fore.RED}    .l;           {Fore.WHITE}`##############################################`         {Fore.RED}.i. 
+{Fore.RED}     ;.           {Fore.WHITE}`##############################################`         {Fore.RED}.i  
+{Fore.RED}     ..```````````{Fore.WHITE}````````````````````````````````````{Fore.LIGHTBLACK_EX}crypt0lith{Fore.WHITE}``{Fore.RED}`````````..  
+{Fore.RED}     .             Chaos-Based Edge Adaptive Steganography Tool             .  
+{Fore.WHITE}
     '''
 
     # Display the banner
