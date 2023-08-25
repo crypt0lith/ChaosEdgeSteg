@@ -118,6 +118,7 @@ class ChaosEdgeSteg:
 
     def map_chaotic_trajectory_to_edges(self):
         # Identify edge coordinates
+        print("Detecting edges...")
         edge_coordinates = self.edges
 
         # Check if edge_coordinates is empty
@@ -133,6 +134,7 @@ class ChaosEdgeSteg:
         normalized_indices = normalized_indices.astype(int)
 
         # Select edge coordinates and handle collisions
+        print("Mapping chaotic trajectory to edge coordinates...")
         available_edge_mask = np.ones(len(edge_coordinates), dtype=bool)
         final_selected_edge_coordinates = []
         for i, index in enumerate(normalized_indices[:, 0]):
