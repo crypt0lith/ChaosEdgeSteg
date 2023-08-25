@@ -28,7 +28,7 @@ Where \(a\) and \(b\) are constants. For ChaosEdgeSteg, we utilize typical value
 
 - **Edge Adaptive Embedding:** Prioritizes edges for embedding, making the embedded information less perceptible.
 
-  - **Advanced Stealth:** Edge detection thresholds are adaptively adjusted to reflect both image and payload size, ensuring optimum embedding conditions and minimizing risk of detection by modern steganalysis methods.
+  - **Advanced Stealth:** Adaptively adjusts edge detection thresholds to reflect both image and payload size, ensuring optimum embedding conditions and minimizing risk of detection by modern steganalysis methods.
 
 - **Defense in Depth:** Requires possession of the key, payload length, and original cover image in order to extract steganographic content.
 
