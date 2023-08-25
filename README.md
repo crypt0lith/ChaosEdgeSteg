@@ -1,37 +1,40 @@
 # ChaosEdgeSteg
-Chaos-Based Edge Adaptive Steganography Tool
 
 ![chaosedgesteg_shellview](https://github.com/crypt0lith/ChaosEdgeSteg/assets/118923461/731142d7-be35-4b16-9eb8-76ff947b3348)
 
-
+ChaosEdgeSteg is a unique steganography tool that leverages the unpredictable nature of chaotic systems, specifically the Hénon map, combined with edge detection to embed information within images in a concealed manner.
 
 ## Introduction
-`ChaosEdgeSteg` is a unique steganography tool that leverages the unpredictable nature of chaotic systems, specifically the Henon map, combined with edge detection to embed information within images in a concealed manner.
+
 
 ### Mathematics & Logic of ChaosEdgeSteg
 
 
-**Chaotic Systems:** At the heart of `ChaosEdgeSteg` is the Henon map, a type of discrete-time dynamical system. Such systems are characterized by their sensitivity to initial conditions, a property commonly referred to as the "butterfly effect". Mathematically, the Henon map is described by the following equations:
+**Chaotic Systems:** The core mechanism of ChaosEdgeSteg revolves around the Hénon map, a type of discrete-time dynamical system. Such systems are characterized by their sensitivity to initial conditions, a property commonly referred to as the "butterfly effect". Mathematically, the Hénon map is described by the following equations:
 
 $$x_{n+1} = 1 - a x_n^2 + y_n$$
 
 $$y_{n+1} = b x_n$$
 
-Where \(a\) and \(b\) are constants. For `ChaosEdgeSteg`, we utilize typical values of \(a=1.4\) and \(b=0.3\) which produce chaotic behavior.
+Where \(a\) and \(b\) are constants. For ChaosEdgeSteg, we utilize typical values of \(a=1.4\) and \(b=0.3\) which produce chaotic behavior.
 
-**Edge Detection:** `ChaosEdgeSteg` identifies edges in the cover image, which are regions with rapid intensity change, using the Canny edge detection method. These edges are less perceptible to the human eye when modified, making them ideal for embedding information.
+**Edge Detection:** ChaosEdgeSteg identifies edges in the cover image, which are regions with rapid intensity change, using the Canny edge detection method. These edges are less perceptible to the human eye when modified, making them ideal for embedding information.
 
-**Embedding Mechanism:** The chaotic trajectory of the Henon map is mapped onto the detected edge coordinates. This trajectory determines where in the image the payload will be embedded. Due to the chaotic nature of the Henon map, this embedding is resistant to minor changes in the image and difficult to predict without knowledge of the initial conditions (i.e., the key).
+**Embedding Mechanism:** The chaotic trajectory of the Hénon map is mapped onto the detected edge coordinates. This trajectory determines where in the image the payload will be embedded. Due to the chaotic nature of the Hénon map, this embedding is highly sensitive to minor changes in the image and nearly impossible to predict without knowledge of the initial conditions (i.e., the key).
 
 ## Features
 
-- **Adaptive Embedding:** Embeds information based on image content, ensuring minimal perceptual distortion.
-- **Chaos-Based Security:** Utilizes the Henon map to dictate the embedding positions, enhancing security.
-- **Edge Prioritization:** Prioritizes edges for embedding, making the embedded information less perceptible.
+- **Chaos-Based Security:** Utilizes the Hénon map to dictate the embedding positions, enhancing security.
+
+- **Edge Adaptive Embedding:** Prioritizes edges for embedding, making the embedded information less perceptible.
+
+  - **Advanced Stealth:** Edge detection thresholds are adaptively adjusted to reflect both image and payload size, ensuring optimum embedding conditions and minimizing risk of detection by modern steganalysis methods.
+
+- **Defense in Depth:** Requires possession of the key, payload length, and original cover image in order to extract steganographic content.
 
 ## Installation
 
-To use `ChaosEdgeSteg`, you can clone the repository:
+To use ChaosEdgeSteg, you can clone the repository:
 
 ```shell
 git clone https://github.com/crypt0lith/ChaosEdgeSteg.git
