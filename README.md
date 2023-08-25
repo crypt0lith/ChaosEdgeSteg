@@ -1,10 +1,14 @@
 # ChaosEdgeSteg
 Chaos-Based Edge Adaptive Steganography Tool
 
+![chaosedgesteg_shellview](https://github.com/crypt0lith/ChaosEdgeSteg/assets/118923461/952da483-066d-430a-a186-40f3116cbff5)
+
+
 ## Introduction
 `ChaosEdgeSteg` is a unique steganography tool that leverages the unpredictable nature of chaotic systems, specifically the Henon map, combined with edge detection to embed information within images in a concealed manner.
 
 ### Mathematics & Logic of ChaosEdgeSteg
+
 
 **Chaotic Systems:** At the heart of `ChaosEdgeSteg` is the Henon map, a type of discrete-time dynamical system. Such systems are characterized by their sensitivity to initial conditions, a property commonly referred to as the "butterfly effect". Mathematically, the Henon map is described by the following equations:
 
