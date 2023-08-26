@@ -92,7 +92,7 @@ class ChaosEdgeSteg:
                 "Payload too large for cover image. Use a larger image, or divide the payload into smaller chunks and "
                 "embed across multiple images.")
         elif payload_influence >= 5:
-            if self.payload_length < 5000:
+            if self.payload_length <= 14000:
                 raise SteganographyError(
                     "Payload length massively exceeds capacity of the payload image. Use a larger image, or divide "
                     "the payload into smaller chunks and embed across multiple images.")
