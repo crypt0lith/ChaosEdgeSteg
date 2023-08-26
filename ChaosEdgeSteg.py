@@ -5,8 +5,10 @@ import re
 from collections import Counter
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
-from colorama import init, Fore, Back
+from colorama import init, Fore
+from skimage import io
 
 init(autoreset=True)
 
@@ -16,7 +18,9 @@ class SteganographyError(Exception):
 
 
 class ChaosEdgeSteg:
-    def __init__(self, key, image_path):
+    def __init__(self, key, image_path, verbose=False, debug=False):
+        self.verbose = verbose
+        self.debug = debug
         self.gray_img = None
         self.edge_map = None
         self.key = str(key[6:])
@@ -27,6 +31,14 @@ class ChaosEdgeSteg:
         self.henon_x, self.henon_y = self.generate_henon_map()
         self.edges = self.detect_edges(self.image)
         self.selected_edge_coordinates = self.map_chaotic_trajectory_to_edges()
+
+    def print_message(self, message, is_debug=False):
+        if self.debug or (self.verbose and not is_debug):
+            print(message)
+
+    def save_bitmap(self, image_path, image):
+        if self.debug:
+            cv2.imwrite(image_path, image)
 
     @staticmethod
     def str_to_bin(string):
@@ -49,6 +61,8 @@ class ChaosEdgeSteg:
         return entropy
 
     def calculate_adaptive_thresholds(self, image):
+        self.print_message("Calculating adaptive thresholds...")
+
         # Constants
         min_lower_threshold = 85
         base_lower_threshold = 45
@@ -60,17 +74,54 @@ class ChaosEdgeSteg:
 
         # Measure 'information density' of the payload
         normalized_payload_size = self.payload_length / (filtered_image.shape[0] * filtered_image.shape[1])
-        # print(f"Normalized Payload Size: {normalized_payload_size}")
+        self.print_message(f"Normalized Payload Size: {normalized_payload_size}", is_debug=True)
 
         # Measure 'edginess' of the image
         standard_edge_map = cv2.Canny(filtered_image, base_lower_threshold, base_upper_threshold)
         edge_density = cv2.countNonZero(standard_edge_map) / (filtered_image.shape[0] * filtered_image.shape[1])
-        # print(f"Edge density: {edge_density}")
+        self.print_message(f"Edge density: {edge_density}", is_debug=True)
 
         # Compute the payload influence by multiplying normalized payload size with a constant factor
-        amplify_factor = 100  # This value needs to be fine-tuned
+        amplify_factor = 100
         payload_influence = normalized_payload_size * amplify_factor
-        # print(f"Payload influence: {payload_influence}")
+        self.print_message(f"Payload influence: {payload_influence}", is_debug=True)
+        if 2 <= payload_influence < 2.5:
+            print("Payload is disproportionately larger than cover image. This may take some time...")
+        elif payload_influence >= 2.5 > 5:
+            raise SteganographyError(
+                "Payload too large for cover image. Use a larger image, or divide the payload into smaller chunks and "
+                "embed across multiple images.")
+        elif payload_influence >= 5:
+            if self.payload_length < 5000:
+                raise SteganographyError(
+                    "Payload length massively exceeds capacity of the payload image. Use a larger image, or divide "
+                    "the payload into smaller chunks and embed across multiple images.")
+            else:
+                position_within_range = self.payload_length - 12900
+                percentile = (position_within_range / 30900) * 100
+                if percentile < 33:
+                    dialogue = f"This is an impressive achievement, considering the fact that you're trying to embed " \
+                               f"it in a {self.image.shape[1]}x{self.image.shape[0]} image.\nYour confidence in my " \
+                               f"script is flattering, but unfortunately y"
+                elif 33 <= percentile < 66:
+                    dialogue = f"What are you even trying to embed? Is it classified documents proving the existence of " \
+                               f"the reptilian shadow government?\nIf you're gonna go schizo, you have to do it " \
+                               f"properly. Tin foil goes around the head and over the windows.\nY"
+                else:
+                    image = io.imread('https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9'
+                                      '/Caspar_David_Friedrich_-_Wanderer_above_the_sea_of_fog.jpg/800px'
+                                      '-Caspar_David_Friedrich_-_Wanderer_above_the_sea_of_fog.jpg')
+                    plt.imshow(image, interpolation="nearest")
+                    plt.title('Payload is too big')
+                    plt.axis('off')
+                    plt.show()
+                    raise SteganographyError("Payload is too big")
+
+                raise SteganographyError(
+                    f"The average character count of a scientific research paper is roughly between 12900 and 43800"
+                    f" characters. \nThe length of the payload you provided is {self.payload_length} characters, "
+                    f"placing it in the {int(round(percentile, 0))}th percentile of that range.\n{dialogue}ou will need to "
+                    f"divide the payload into smaller chunks and embed across multiple images.")
 
         # Compute combined density
         combined_density = edge_density + payload_influence
@@ -79,7 +130,8 @@ class ChaosEdgeSteg:
         threshold_scale = 1 - combined_density  # Scale the thresholds towards min values for high combined_density
         lower_threshold = int(base_lower_threshold + threshold_scale * (min_lower_threshold - base_lower_threshold))
         upper_threshold = int(base_upper_threshold + threshold_scale * (min_upper_threshold - base_upper_threshold))
-        # print(f"Thresholds after combined density adjustment: {lower_threshold, upper_threshold}")
+        self.print_message(f"Thresholds after combined density adjustment: {lower_threshold, upper_threshold}",
+                           is_debug=True)
 
         return lower_threshold, upper_threshold
 
@@ -94,7 +146,7 @@ class ChaosEdgeSteg:
 
         # Edge detection using Canny with adaptive thresholds
         edge_map = cv2.Canny(gray_img, lower_threshold, upper_threshold)
-        # cv2.imwrite('edge_map.png', edge_map)
+        self.save_bitmap('edge_map.png', edge_map)
         self.edge_map = edge_map
 
         # Identify edge coordinates
@@ -111,14 +163,20 @@ class ChaosEdgeSteg:
         return x, y
 
     def generate_henon_parameters_from_key(self, key):
+        self.print_message("Generating Henon parameters from key...")
+
         entropy = self.calculate_key_entropy(key)
+        self.print_message(f"Key entropy: {entropy}", is_debug=True)
+
         a = 1.4 - (0.2 * (entropy / 8))
         b = 0.3 + (0.1 * (entropy / 8))
+        self.print_message(f"Parameter a: {a}", is_debug=True)
+        self.print_message(f"Parameter b: {b}", is_debug=True)
         return a, b
 
     def map_chaotic_trajectory_to_edges(self):
         # Identify edge coordinates
-        print("Detecting edges...")
+        self.print_message("Detecting edges...")
         edge_coordinates = self.edges
 
         # Check if edge_coordinates is empty
@@ -134,7 +192,7 @@ class ChaosEdgeSteg:
         normalized_indices = normalized_indices.astype(int)
 
         # Select edge coordinates and handle collisions
-        print("Mapping chaotic trajectory to edge coordinates...")
+        self.print_message("Mapping chaotic trajectory to edge coordinates...")
         available_edge_mask = np.ones(len(edge_coordinates), dtype=bool)
         final_selected_edge_coordinates = []
         for i, index in enumerate(normalized_indices[:, 0]):
@@ -149,9 +207,9 @@ class ChaosEdgeSteg:
         final_selected_edge_coordinates = np.array(final_selected_edge_coordinates)
 
         # Create a blank canvas to visualize the selected edge coordinates
-        # selected_edge_map = np.zeros_like(self.gray_img)
-        # selected_edge_map[final_selected_edge_coordinates[:, 0], final_selected_edge_coordinates[:, 1]] = 255
-        # cv2.imwrite('selected_edge_map.png', selected_edge_map)
+        selected_edge_map = np.zeros_like(self.gray_img)
+        selected_edge_map[final_selected_edge_coordinates[:, 0], final_selected_edge_coordinates[:, 1]] = 255
+        self.save_bitmap('selected_edge_map.png', selected_edge_map)
 
         return final_selected_edge_coordinates
 
@@ -249,7 +307,7 @@ def embed_action(args):
     print(f"Key with hex length appended: {adjusted_key}")
 
     # Instantiate the ChaosEdgeSteg object with the adjusted key and cover image path
-    steg = ChaosEdgeSteg(adjusted_key, args.cover_image_path)
+    steg = ChaosEdgeSteg(adjusted_key, args.cover_image_path, args.verbose, args.debug)
 
     # Embed the payload
     stego_image = steg.embed_payload(args.cover_image_path, payload)
@@ -273,7 +331,7 @@ def extract_action(args):
         return
 
     # Instantiate the ChaosEdgeSteg object with the provided key and original cover image path
-    steg = ChaosEdgeSteg(args.key, args.cover_image_path)
+    steg = ChaosEdgeSteg(args.key, args.cover_image_path, args.verbose, args.debug)
 
     # Extract the payload from the stego image
     extracted_message = steg.extract_payload(args.stego_image_path)
@@ -338,6 +396,9 @@ def main_cli():
     embed_parser.add_argument('-o', '--output_image_path', default=None,
                               help='Path to save the output stego image. If not specified, defaults to '
                                    '"stego_<cover_image_name>".')
+    embed_parser.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output.')
+    embed_parser.add_argument('-vv', '--debug', action='store_true', default=False, help='Enable debug output and '
+                                                                                         'save edge bitmaps.')
     embed_parser.set_defaults(func=embed_action)
 
     # Extract action arguments
@@ -352,6 +413,9 @@ def main_cli():
     extract_parser.add_argument('-o', '--output_text_file', default=None,
                                 help='Path to save the extracted message as a text file. If not specified, '
                                      'the message is printed to the console.')
+    extract_parser.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output.')
+    extract_parser.add_argument('-vv', '--debug', action='store_true', default=False, help='Enable debug output and '
+                                                                                           'save edge bitmaps.')
     extract_parser.set_defaults(func=extract_action)
 
     args = parser.parse_args()
