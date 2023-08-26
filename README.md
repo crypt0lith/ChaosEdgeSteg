@@ -60,8 +60,3 @@ python ChaosEdgeSteg.py embed -c <cover_image_path> -f <payload_txt_file> -k 'se
 ```bash
 python ChaosEdgeSteg.py extract -c <cover_image_path_from_embedding> -i <stego_image_path> -k 'key_with_hex_length' [-o <output_text_file>]
 ```
-
-## Requirements
-- Python 3.x
-- OpenCV (cv2)
-- NumPy
