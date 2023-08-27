@@ -52,11 +52,11 @@ pip install -r requirements.txt
 ### Embedding Payload
 
 ```bash
-python ChaosEdgeSteg.py embed -c <cover_image_path> -f <payload_txt_file> -k 'secret_key' [-o <output_image_path>] [--save_edge_maps]
+python ChaosEdgeSteg.py embed [-v/-vv] -c <cover_image_path> -f <payload_txt_file> -k 'secret_key' [-o <output_image_path>]
 ```
 
 ### Extracting Payload
 
 ```bash
-python ChaosEdgeSteg.py extract -c <cover_image_path_from_embedding> -i <stego_image_path> -k 'key_with_hex_length' [-o <output_text_file>]
+python ChaosEdgeSteg.py extract [-v/-vv] -c <cover_image_path_from_embedding> -i <stego_image_path> -k 'key_with_hex_length' [-o <output_text_file>]
 ```
