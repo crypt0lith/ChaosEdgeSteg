@@ -5,10 +5,8 @@ import re
 from collections import Counter
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 from colorama import init, Fore
-from skimage import io
 
 init(autoreset=True)
 
@@ -86,42 +84,16 @@ class ChaosEdgeSteg:
         payload_influence = normalized_payload_size * amplify_factor
         self.print_message(f"Payload influence: {payload_influence}", is_debug=True)
         if 2 <= payload_influence < 2.5:
-            print("Payload is disproportionately larger than cover image. This may take some time...")
-        elif payload_influence >= 2.5 > 5:
+            print(
+                "Warning: The payload size is approaching the limit for the given cover image. Processing might take "
+                "longer than usual.")
+        elif payload_influence >= 2.5:
+            divisions_required = -(-payload_influence // 1.5)
             raise SteganographyError(
-                "Payload too large for cover image. Use a larger image, or divide the payload into smaller chunks and "
-                "embed across multiple images.")
-        elif payload_influence >= 5:
-            if self.payload_length <= 14000:
-                raise SteganographyError(
-                    "Payload length massively exceeds capacity of the payload image. Use a larger image, or divide "
-                    "the payload into smaller chunks and embed across multiple images.")
-            else:
-                position_within_range = self.payload_length - 12900
-                percentile = (position_within_range / 30900) * 100
-                if percentile < 33:
-                    dialogue = f"This is an impressive achievement, considering the fact that you're trying to embed " \
-                               f"it in a {self.image.shape[1]}x{self.image.shape[0]} image.\nYour confidence in my " \
-                               f"script is flattering, but unfortunately y"
-                elif 33 <= percentile < 66:
-                    dialogue = f"What are you even trying to embed? Is it classified documents proving the existence of " \
-                               f"the reptilian shadow government?\nIf you're gonna go schizo, you have to do it " \
-                               f"properly. Tin foil goes around the head and over the windows.\nY"
-                else:
-                    image = io.imread('https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9'
-                                      '/Caspar_David_Friedrich_-_Wanderer_above_the_sea_of_fog.jpg/800px'
-                                      '-Caspar_David_Friedrich_-_Wanderer_above_the_sea_of_fog.jpg')
-                    plt.imshow(image, interpolation="nearest")
-                    plt.title('Payload is too big')
-                    plt.axis('off')
-                    plt.show()
-                    raise SteganographyError("Payload is too big")
-
-                raise SteganographyError(
-                    f"The average character count of a scientific research paper is roughly between 12900 and 43800"
-                    f" characters. \nThe length of the payload you provided is {self.payload_length} characters, "
-                    f"placing it in the {int(round(percentile, 0))}th percentile of that range.\n{dialogue}ou will need to "
-                    f"divide the payload into smaller chunks and embed across multiple images.")
+                f"The payload is too large for the selected cover image. For the chosen payload and cover "
+                f"image, it is recommended to divide the payload into {int(divisions_required)} smaller chunks "
+                f"({int(self.payload_length) // int(divisions_required)} char each) and embed "
+                f"across multiple images.")
 
         # Compute combined density
         combined_density = edge_density + payload_influence
