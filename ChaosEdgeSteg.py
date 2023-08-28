@@ -6,6 +6,7 @@ from collections import Counter
 
 import cv2
 import numpy as np
+from tqdm import tqdm
 from colorama import init, Fore
 
 init(autoreset=True)
@@ -164,10 +165,10 @@ class ChaosEdgeSteg:
         normalized_indices = normalized_indices.astype(int)
 
         # Select edge coordinates and handle collisions
-        self.print_message("Mapping chaotic trajectory to edge coordinates...")
+        print("Mapping chaotic trajectory to edge coordinates...")
         available_edge_mask = np.ones(len(edge_coordinates), dtype=bool)
         final_selected_edge_coordinates = []
-        for i, index in enumerate(normalized_indices[:, 0]):
+        for i, index in tqdm(enumerate(normalized_indices[:, 0]), total=len(normalized_indices)):
             original_index = index  # Store the original index to check for full loop without available edge
             while not available_edge_mask[index]:
                 index = (index + 1) % len(edge_coordinates)
