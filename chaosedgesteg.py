@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# coding:UTF-8
 import argparse
 import math
 import os
@@ -7,9 +9,10 @@ from collections import Counter
 import cv2
 import numpy as np
 from tqdm import tqdm
-from colorama import init, Fore
 
-init(autoreset=True)
+import banner
+
+banner.init(autoreset=True)
 
 
 class SteganographyError(Exception):
@@ -40,14 +43,15 @@ class ChaosEdgeSteg:
             cv2.imwrite(image_path, image)
 
     @staticmethod
-    def str_to_bin(string):
-        binary = ''.join(format(ord(i), '08b') for i in string)
-        return binary
+    def data_to_bin(data):
+        if isinstance(data, str):
+            return ''.join(format(ord(i), '08b') for i in data)
+        elif isinstance(data, bytes):
+            return ''.join(format(byte, '08b') for byte in data)
 
     @staticmethod
-    def bin_to_str(binary):
-        string = ''.join(chr(int(binary[i:i + 8], 2)) for i in range(0, len(binary), 8))
-        return string
+    def bin_to_data(binary):
+        return bytes([int(binary[i:i + 8], 2) for i in range(0, len(binary), 8)])
 
     @staticmethod
     def calculate_key_entropy(key):
@@ -187,8 +191,8 @@ class ChaosEdgeSteg:
         return final_selected_edge_coordinates
 
     def embed_payload(self, img_path, payload):
-        print("Embedding message...")
-        binary_payload = self.str_to_bin(payload)
+        print("Embedding payload...")
+        binary_payload = self.data_to_bin(payload)
         binary_payload_length = len(binary_payload)
 
         img = cv2.imread(img_path)
@@ -222,7 +226,7 @@ class ChaosEdgeSteg:
                                      "maintain alignment with the chaotic mapping and ensure successful "
                                      "extraction.")
 
-        print("Performing extraction...")
+        print("Extracting payload...")
         stego_img = cv2.imread(stego_img_path)
         height, width, _ = stego_img.shape
 
@@ -265,14 +269,26 @@ class ChaosEdgeSteg:
 
         # Reconstruct the payload from the extracted bits
         extracted_payload_bin = ''.join(extracted_bits)
-        payload = self.bin_to_str(extracted_payload_bin)
+        payload = self.bin_to_data(extracted_payload_bin)
         return payload
 
 
 def embed_action(args):
-    # Read payload from the provided text file
-    with open(args.payload_txt_file, 'r') as file:
-        payload = file.read()
+    # Check for mutual exclusivity of -p and -f
+    if args.payload and args.payload_file:
+        print("Error: Cannot use -p and -f simultaneously. Choose one method to provide the payload.")
+        return
+    elif args.payload:
+        payload = args.payload
+    elif args.payload_file:
+        if not args.payload_file.endswith('.zip'):
+            print("Error: Only ZIP archives are allowed with -f argument.")
+            return
+        with open(args.payload_file, 'rb') as file:
+            payload = file.read()
+    else:
+        print("Error: Either -p or -f must be provided to specify the payload.")
+        return
 
     # Adjust key by appending the hex length of the payload
     hex_length = f"{len(payload):04X}"
@@ -287,10 +303,8 @@ def embed_action(args):
 
     # Determine the output image path
     if args.output_image_path:
-        # If the user has provided an output path, ensure it's saved as a .png
         output_image_path = os.path.splitext(args.output_image_path)[0] + '.png'
     else:
-        # If no output path provided, use the default naming but save as a .png
         output_image_path = f'stego_{os.path.splitext(os.path.basename(args.cover_image_path))[0]}.png'
 
     cv2.imwrite(output_image_path, stego_image)
@@ -298,8 +312,7 @@ def embed_action(args):
 
 
 def extract_action(args):
-    # Verify that the key provided matches the required form
-    if not re.match(r"^[0-9A-Fa-f]{4}::", args.key):
+    if not re.match(r"^[0-9A-Fa-f]+::", args.key):
         print("Invalid key format. Ensure the key has the correct hex length appendment (e.g., 'XXXX::key').")
         return
 
@@ -307,54 +320,30 @@ def extract_action(args):
     steg = ChaosEdgeSteg(args.key, args.cover_image_path, args.verbose, args.debug)
 
     # Extract the payload from the stego image
-    extracted_message = steg.extract_payload(args.stego_image_path)
+    extracted_payload = steg.extract_payload(args.stego_image_path)
 
-    # Save the extracted message to the specified output text file, if provided
-    if args.output_text_file:
-        with open(args.output_text_file, 'w') as file:
-            file.write(extracted_message)
-        print(f"Extracted message saved to: {args.output_text_file}")
+    # Check for ZIP file signature
+    if extracted_payload[:4] == b'PK\x03\x04':
+        # It's a ZIP payload
+        # Determine the output file path
+        if args.output_file:
+            output_file_path = args.output_file
+        else:
+            # If no output file path provided, use a default name and save in the current directory
+            output_file_path = 'extracted_payload.zip'
+            print(f"Extracted ZIP archive saved to: {output_file_path}")
+
+        # Save the payload as a binary file
+        with open(output_file_path, 'wb') as file:
+            file.write(extracted_payload)
     else:
-        print(f"Extracted message: {extracted_message}")
+        # It's a text payload
+        extracted_text = extracted_payload.decode('utf-8', errors='replace')
+        print(f"Extracted payload: {extracted_text}")
 
 
 def main_cli():
-    __header__ = f'''
-{Fore.RED}                       .    .             .             ...               
-{Fore.RED}             ,.....    ;     .           ...          ..;;;..   .....          
-{Fore.RED}          .;i         .s     .s.        ..;..       ,ji&OOoq;.   ......       
-{Fore.RED}        .jil          SS      s$.       .;;;.       g!'     %S.   ;;;;;;;.     
-{Fore.RED}      .ll$l          .$S      .s$.     .;;$;;.     ;$        $s  ;b@$$SSijc. 
-{Fore.RED}    ..7l$l           .$S       ;$S     .;$@$;.    .s$        S$. ;K       `s;  
-{Fore.RED}   ..77$S           .;$*       ;$$    .;$$*$$;.   .S$        S$; :B         '   
-{Fore.RED} ..ps$$$S           .;$l       i$$    .$$* *$$.   ;S$        S$; ;;$           
-{Fore.RED} ;sXSf$$s           .s$$      .$$$   .;$*   *$;.  ;S$        S$;  ;;$          
-{Fore.RED} si`7f$$s           sS$$*...+*$$$$  .;$*******$;. .S$        S$.   ;;$.        
-{Fore.RED} F  .>$$s          jyXF====##@@$$$  .S$##333##$S.  ;$s       S$;*.  ;*$    .   
-{Fore.RED}    .$$$S        ;iZ ?&ttfPPPPQ$$$ ..$$       $$.. .lSs      S$.zS. .!$$   .   
-{Fore.RED}    .s$$$s     .sZZ  ???       *$s .S$         $S.   $$S,   ;S$ sHl:.;x$$  :   
-{Fore.RED}    .ss$$Ss...;d$Z   ?li       *$. .S           S.    ;$@@sS$$; 'S$$$XX#$$.!   
-{Fore.RED}    ..ss@@@#GS$Z/    ;ll      .S.  sS           Ss     .SSSSS.     \$$$@@$;S.  
-{Fore.RED}     .ssS&&#$ff/     .;l      ;s   s.            ;      s;  s       .\X$$$Ss;  
-{Fore.RED}      ssSSSXF/`       ;!      s    ;.            ;      ;   ;          xXSsZ,  
-{Fore.RED}      .sSS27.          ;      *    ;             ;      ;   ;          .l5Zz. 
-{Fore.RED}      .sSS4            ;      ;    ;             ;      ;   ;           .xXx;. 
-{Fore.RED}     ..sSi;            .      .    ;             ;      ;   ;           .\VS;. 
-{Fore.RED}     ..SSl             .      .    .             .      ;   .            .SS;. 
-{Fore.RED}     .;Sl;             .      .    .             .      .   .            .IS;. 
-{Fore.RED}    ..Sl..........{Fore.WHITE}................................................{Fore.RED}.........S;. 
-{Fore.RED}    .;Sl;         {Fore.WHITE}`##############################################`        {Fore.RED}.lS. 
-{Fore.RED}    .SSl          {Fore.WHITE}`##############################################`         {Fore.RED}ll. 
-{Fore.RED}    .Sl.          {Fore.WHITE}`###{Fore.RED}/ __/{Fore.WHITE}###{Fore.RED}/ /{Fore.WHITE}###########{Fore.RED}/ __// /{Fore.WHITE}#############`         {Fore.RED}.l. 
-{Fore.RED}    .Si...........{Fore.WHITE}`##{Fore.RED}/ _/ / _  // _ `// -_) \ \ / __// -_)/ _ `/{Fore.WHITE}#`{Fore.RED}..........l. 
-{Fore.RED}    .l1           {Fore.WHITE}`#{Fore.RED}/___/ \_,_/ \_, / \__//___/ \__/ \__/ \_, /{Fore.WHITE}##`         {Fore.RED}.l. 
-{Fore.RED}    .l;           {Fore.WHITE}`############{Fore.RED}/___/{Fore.WHITE}#####################{Fore.RED}/___/{Fore.WHITE}###`         {Fore.RED}.i. 
-{Fore.RED}    .l;           {Fore.WHITE}`##############################################`         {Fore.RED}.i. 
-{Fore.RED}     ;.           {Fore.WHITE}`##############################################`         {Fore.RED}.i  
-{Fore.RED}     ..```````````{Fore.WHITE}````````````````````````````````````{Fore.LIGHTBLACK_EX}crypt0lith{Fore.WHITE}``{Fore.RED}`````````..  
-{Fore.RED}     .             Chaos-Based Edge Adaptive Steganography Tool             .  
-{Fore.WHITE}
-    '''
+    __header__ = banner.h()
 
     # Display the banner
     print(__header__)
@@ -364,7 +353,9 @@ def main_cli():
     # Embed action arguments
     embed_parser = subparsers.add_parser('embed', help='Embed payload into an image.')
     embed_parser.add_argument('-c', '--cover_image_path', required=True, help='Path to the cover image.')
-    embed_parser.add_argument('-f', '--payload_txt_file', required=True, help='Path to the payload text file.')
+    embed_parser.add_argument('-p', '--payload', type=str,
+                              help='String payload to embed directly from the command line.')
+    embed_parser.add_argument('-f', '--payload_file', type=str, help='Path to the payload file (ZIP archive).')
     embed_parser.add_argument('-k', '--key', required=True, help='Key to use for embedding.')
     embed_parser.add_argument('-o', '--output_image_path', default=None,
                               help='Path to save the output stego image. If not specified, defaults to '
@@ -383,7 +374,7 @@ def main_cli():
     extract_parser.add_argument('-k', '--key', required=True,
                                 help='Key used during embedding, with the payload length appendment (e.g., '
                                      '"XXXX::key").')
-    extract_parser.add_argument('-o', '--output_text_file', default=None,
+    extract_parser.add_argument('-o', '--output_file', default=None,
                                 help='Path to save the extracted message as a text file. If not specified, '
                                      'the message is printed to the console.')
     extract_parser.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output.')
