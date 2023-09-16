@@ -93,12 +93,7 @@ class ChaosEdgeSteg:
                 "Warning: The payload size is approaching the limit for the given cover image. Processing might take "
                 "longer than usual.")
         elif payload_influence >= 2.5:
-            divisions_required = -(-payload_influence // 1.5)
-            raise SteganographyError(
-                f"The payload is too large for the selected cover image. For the chosen payload and cover "
-                f"image, it is recommended to divide the payload into {int(divisions_required)} smaller chunks "
-                f"({int(self.payload_length) // int(divisions_required)} char each) and embed "
-                f"across multiple images.")
+            raise SteganographyError("The payload is too large for the selected cover image.")
 
         # Compute combined density
         combined_density = edge_density + payload_influence
