@@ -7,7 +7,7 @@ ChaosEdgeSteg is a unique steganography tool that leverages the unpredictable na
 ## Introduction
 
 
-### Mathematics & Logic of ChaosEdgeSteg
+### ChaosEdgeSteg's Steganographic Mechanism
 
 
 **Chaotic Systems:** The core mechanism of ChaosEdgeSteg revolves around the Hénon map, a type of discrete-time dynamical system. Such systems are characterized by their sensitivity to initial conditions, a property commonly referred to as the "butterfly effect". Mathematically, the Hénon map is described by the following equations:
@@ -30,7 +30,13 @@ Where \(a\) and \(b\) are constants. For ChaosEdgeSteg, we utilize typical value
 
   - **Advanced Stealth:** Adaptively adjusts edge detection thresholds to reflect both image and payload size, ensuring optimum embedding conditions and minimizing risk of detection by modern steganalysis methods.
 
-- **Defense in Depth:** Requires possession of the key, payload length, and original cover image in order to extract steganographic content.
+- **Defense in Depth:** Requires possession of the key, payload length, and original cover image in order to extract steganographic content. Keys are checked against an embedded SHA256 hash as an additional validation mechanism.
+
+- **Payload Execution:** Embedded Python scripts can be executed as a fileless process when extracted. ChaosEdgeSteg spawns a temporary PowerShell instance, base64 encodes the script, and executes it. When the embedded script finishes execution, the spawned temporary shell is removed.
+
+- **Embed a ZIP Archive:** If it's a `.zip` archive, it can be embedded with the `[-f]` option. Usually requires larger cover images.
+
+- **Quiet Mode:** Suppresses dialogue messages, allowing output to be piped to other Unix tools in an obfuscated way.
 
 ## Installation
 
@@ -52,11 +58,11 @@ pip install -r requirements.txt
 ### Embedding Payload
 
 ```bash
-python chaosedgesteg.py embed [-v/-vv] -c <cover_image_path> -f <payload_file> -k 'secret_key' [-o <output_image_path>]
+python chaosedgesteg.py embed [-v/-vv/-q] -c <cover_image_path> -f <payload_file> -k 'secret_key' [-o <output_image_path>]
 ```
 
 ### Extracting Payload
 
 ```bash
-python chaosedgesteg.py extract [-v/-vv] -c <cover_image_path_from_embedding> -i <stego_image_path> -k 'key_with_hex_length' [-o <output_file>]
+python chaosedgesteg.py extract [-v/-vv/-q] -c <cover_image_path_from_embedding> -i <stego_image_path> -k '0000::secret_key' [-o <output_file>] [-x]
 ```

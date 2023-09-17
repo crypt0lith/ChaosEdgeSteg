@@ -1,4 +1,7 @@
-.idea
+.idea/
 *.iml
+__pycache__/
+*.pyc
+*.pyo
 out
 gen
