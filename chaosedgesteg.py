@@ -15,6 +15,7 @@ from collections import Counter
 import cv2
 import numpy as np
 from tqdm import tqdm
+from mpmath import mp
 
 import banner
 
@@ -25,8 +26,10 @@ class SteganographyError(Exception):
     pass
 
 
-def sha256_hashgen(key):
-    return hashlib.sha256(key.encode()).hexdigest()
+def sha256_hashgen(data):
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    return hashlib.sha256(data).hexdigest()
 
 
 class ChaosEdgeSteg:
@@ -54,11 +57,11 @@ class ChaosEdgeSteg:
             return
 
         if msg_type == "debug" and self.debug:
-            print(message)
+            print(f"[*] {message}")
         elif msg_type == "verbose" and self.verbose:
-            print(message)
+            print(f"[*] {message}")
         elif msg_type == "regular":
-            print(message)
+            print(f"[{banner.Fore.RED}*{banner.Fore.RESET}] {message}")
 
     def save_bitmap(self, bitmap_name, image):
         if self.save_bitmaps:
@@ -78,10 +81,6 @@ class ChaosEdgeSteg:
             return ''.join(format(ord(i), '08b') for i in data)
         elif isinstance(data, bytes):
             return ''.join(format(byte, '08b') for byte in data)
-
-    @staticmethod
-    def bin_to_data(binary):
-        return bytes([int(binary[i:i + 8], 2) for i in range(0, len(binary), 8)])
 
     @staticmethod
     def calculate_key_entropy(key):
@@ -107,7 +106,7 @@ class ChaosEdgeSteg:
 
         # Measure 'information density' of the payload
         normalized_payload_size = self.payload_length / (filtered_image.shape[0] * filtered_image.shape[1])
-        self.print_message(f"Normalized Payload Size: {normalized_payload_size}", msg_type="debug")
+        self.print_message(f"Normalized payload size: {normalized_payload_size}", msg_type="debug")
 
         # Measure 'edginess' of the image
         standard_edge_map = cv2.Canny(filtered_image, base_lower_threshold, base_upper_threshold)
@@ -157,12 +156,20 @@ class ChaosEdgeSteg:
         return edge_coordinates
 
     def generate_henon_map(self):
-        x, y = [0.1], [0.1]
+        mp.dps = 50
+
+        x, y = [mp.mpf('0.1')], [mp.mpf('0.1')]
+        a, b = mp.mpf(self.a), mp.mpf(self.b)
+
         for i in range(self.payload_length * 8):
-            next_x = y[-1] + 1 - self.a * x[-1] ** 2
-            next_y = self.b * x[-1]
+            next_x = y[-1] + mp.mpf('1.0') - a * x[-1] ** 2
+            next_y = b * x[-1]
             x.append(next_x)
             y.append(next_y)
+
+        x = [float(val) for val in x]
+        y = [float(val) for val in y]
+
         return x, y
 
     def generate_henon_parameters_from_key(self, key):
@@ -193,6 +200,9 @@ class ChaosEdgeSteg:
         normalized_indices = (henon_map - henon_map.min()) / (henon_map.max() - henon_map.min())
         normalized_indices *= (len(edge_coordinates) - 1)
         normalized_indices = normalized_indices.astype(int)
+
+        self.print_message(f"Payload length: {self.payload_length}", msg_type="debug")
+        self.print_message(f"Available indices: {str(len(normalized_indices))}", msg_type="debug")
         if self.payload_length >= len(normalized_indices):
             raise SteganographyError("Payload is too large for the input image.")
 
@@ -200,7 +210,10 @@ class ChaosEdgeSteg:
         self.print_message("Mapping chaotic trajectory to edge coordinates...")
         available_edge_mask = np.ones(len(edge_coordinates), dtype=bool)
         final_selected_edge_coordinates = []
-        for i, index in tqdm(enumerate(normalized_indices[:, 0]), total=len(normalized_indices), disable=self.quiet):
+        for i, index in tqdm(enumerate(normalized_indices[:, 0]), total=len(normalized_indices), disable=self.quiet,
+                             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+                             ascii=".#", leave=False):
+
             original_index = index  # Store the original index to check for full loop without available edge
             while not available_edge_mask[index]:
                 index = (index + 1) % len(edge_coordinates)
@@ -300,25 +313,29 @@ class ChaosEdgeSteg:
             modified_channels[coord_key] = channel + 1
 
         # Reconstruct the payload from the extracted bits
-        extracted_binary_payload = ''.join(extracted_bits)
+        extracted_bits_str = ''.join(extracted_bits)
+        extracted_binary_payload = int(extracted_bits_str, 2).to_bytes((len(extracted_bits_str) + 7) // 8,
+                                                                       byteorder='big')
 
         # Extract the embedded SHA256 hash
-        extracted_binary_key_hash = extracted_binary_payload[:256]
-        extracted_key_hash = hex(int(extracted_binary_key_hash, 2))[2:].zfill(64)
+        extracted_binary_key_hash = extracted_binary_payload[:32]
+        extracted_key_hash = extracted_binary_key_hash.hex()
 
         # Generate the SHA256 hash of the provided key
-        s_key = self.len_flag + "::" + self.key
+        s_key = f"{self.len_flag}::{self.key}".encode()
         key_hash = sha256_hashgen(s_key)
+
+        self.print_message(f"Extracted hash: {extracted_key_hash}", msg_type="debug")
+        self.print_message(f"Generated hash: {key_hash}", msg_type="debug")
 
         # Check if the extracted hash matches with the hash of the provided key
         if extracted_key_hash != key_hash:
             raise SteganographyError("Invalid key.")
 
         # Continue with the extraction of the actual payload
-        extracted_binary_payload = extracted_binary_payload[256:]
+        extracted_payload = extracted_binary_payload[32:]
 
-        payload = self.bin_to_data(extracted_binary_payload)
-        return payload
+        return extracted_payload
 
 
 def embed_action(args):
@@ -328,10 +345,10 @@ def embed_action(args):
         return
     elif args.payload:
         if os.path.isfile(args.payload) and args.payload.endswith(('.txt', '.py')):
-            with open(args.payload, 'r') as file:
+            with open(args.payload, 'rb') as file:
                 payload = file.read()
         else:
-            payload = args.payload
+            payload = args.payload.encode()
     elif args.payload_file:
         if not args.payload_file.endswith('.zip'):
             print("Error: Only ZIP archives are allowed with -f argument.")
@@ -342,8 +359,11 @@ def embed_action(args):
         print("Error: Either -p or -f must be provided to specify the payload.")
         return
 
+    payload = payload.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+
     # Adjust key by appending the hex length of the payload
-    adjusted_length = len(payload) + 32
+    payload_byte_length = len(payload.encode('utf-8')) if isinstance(payload, str) else len(payload)
+    adjusted_length = payload_byte_length + 32
     hex_length = f"{adjusted_length:04X}"
     adjusted_key = f"{hex_length}::{args.key}"
 
@@ -357,15 +377,16 @@ def embed_action(args):
     if args.save_key:
         if args.output_image_path:
             directory = os.path.dirname(args.output_image_path)
-            key_path = os.path.join(directory, "key.txt")
-            with open(key_path, 'w') as file:
-                file.write(adjusted_key)
-            print(f"Key saved as \'{key_path}\'")
         else:
-            print("Unable to save key to file. No output image path was specified. Writing to stdout...")
-            print(adjusted_key)
+            directory = os.getcwd()
+            print("No output image path was specified. Saving key to the current directory.")
 
-    if not args.save_key:
+        key_path = os.path.join(directory, "key.txt")
+        with open(key_path, 'w') as file:
+            file.write(adjusted_key)
+        print(f"Key saved as \'{key_path}\'")
+
+    elif not args.save_key:
         if not args.quiet:
             print(f"Key with hex length appended: \'{adjusted_key}\'")
         else:
@@ -375,7 +396,9 @@ def embed_action(args):
     if args.output_image_path:
         output_image_path = os.path.splitext(args.output_image_path)[0] + '.png'
     else:
-        output_image_path = f'stego_{os.path.splitext(os.path.basename(args.cover_image_path))[0]}.png'
+        directory = os.getcwd()
+        output_image_path = os.path.join(directory,
+                                         f'stego_{os.path.splitext(os.path.basename(args.cover_image_path))[0]}.png')
 
     cv2.imwrite(output_image_path, stego_image)
     if not args.quiet:
@@ -394,6 +417,9 @@ def extract_action(args):
     # Extract the payload from the stego image
     extracted_payload = steg.extract_payload(args.stego_image_path)
 
+    # if os.name == 'nt':  # Check if on Windows
+    # extracted_payload = extracted_payload.replace(b'\n', b'\r\n')
+
     # Check for ZIP file signature
     if extracted_payload[:4] == b'PK\x03\x04':
         # It's a ZIP payload
@@ -403,8 +429,8 @@ def extract_action(args):
         else:
             # If no output file path provided, use a default name and save in the current directory
             output_file_path = 'extracted_payload.zip'
-            if not args.quiet:
-                print(f"Extracted ZIP archive saved as \'{output_file_path}\'")
+        if not args.quiet:
+            print(f"Extracted ZIP archive saved as \'{output_file_path}\'")
 
         # Save the payload as a binary file
         with open(output_file_path, 'wb') as file:
@@ -412,8 +438,8 @@ def extract_action(args):
     else:
         # It's a text payload
         extracted_text = extracted_payload.decode('utf-8', errors='replace')
-        if not args.quiet:
-            print(f"Extracted payload: \'{extracted_text}\'")
+        if not args.quiet and not args.output_file:
+            print(f"Extracted payload: \n\n{extracted_text}\n")
         else:
             if args.execute:
                 encoded_script = base64.b64encode(extracted_text.encode("utf-8")).decode("utf-8")
@@ -425,11 +451,14 @@ def extract_action(args):
                 process.communicate()
                 os.remove(tmp_ps_path)
             else:
-                print(extracted_text)
-
+                if not args.output_file:
+                    print(extracted_text)
         if args.output_file:
-            output_file_path = os.path.splitext(args.output_file)[0] + '.txt'
-            with open(output_file_path, 'w') as file:
+            if os.path.splitext(args.output_file)[1] not in ['.txt', '.py']:
+                output_file_path = os.path.splitext(args.output_file)[0] + '.txt'
+            else:
+                output_file_path = args.output_file
+            with open(output_file_path, 'w', newline='\n') as file:
                 file.write(extracted_text)
                 print(f"Extracted payload saved as \'{output_file_path}\'")
         else:
