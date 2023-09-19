@@ -3,19 +3,21 @@
 import argparse
 import base64
 import hashlib
+import http.server
 import math
 import os
 import re
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
 from collections import Counter
 
 import cv2
+from mpmath import mp
 import numpy as np
 from tqdm import tqdm
-from mpmath import mp
 
 import banner
 
@@ -203,16 +205,16 @@ class ChaosEdgeSteg:
 
         self.print_message(f"Payload length: {self.payload_length}", msg_type="debug")
         self.print_message(f"Available indices: {str(len(normalized_indices))}", msg_type="debug")
-        if self.payload_length >= len(normalized_indices):
-            raise SteganographyError("Payload is too large for the input image.")
 
         # Select edge coordinates and handle collisions
         self.print_message("Mapping chaotic trajectory to edge coordinates...")
         available_edge_mask = np.ones(len(edge_coordinates), dtype=bool)
+
+        # Select edge coordinates and handle collisions
         final_selected_edge_coordinates = []
-        for i, index in tqdm(enumerate(normalized_indices[:, 0]), total=len(normalized_indices), disable=self.quiet,
-                             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
-                             ascii=".#", leave=False):
+        for index in tqdm(normalized_indices[:, 0], total=len(normalized_indices), disable=self.quiet,
+                          bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+                          ascii=".#", leave=False):
 
             original_index = index  # Store the original index to check for full loop without available edge
             while not available_edge_mask[index]:
@@ -222,6 +224,7 @@ class ChaosEdgeSteg:
                         "Payload is too large for the input image. All available edge coordinates have been exhausted.")
             final_selected_edge_coordinates.append(edge_coordinates[index])
             available_edge_mask[index] = False
+
         final_selected_edge_coordinates = np.array(final_selected_edge_coordinates)
 
         # Create a blank canvas to visualize the selected edge coordinates
@@ -347,9 +350,13 @@ def embed_action(args):
         if os.path.isfile(args.payload) and args.payload.endswith(('.txt', '.py')):
             with open(args.payload, 'rb') as file:
                 payload = file.read()
+                payload = payload.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
         else:
             payload = args.payload.encode()
     elif args.payload_file:
+        if not os.path.isfile(args.payload_file):
+            print(f"Error: File does not exist \'{os.path.abspath(args.payload_file)}\'")
+            return
         if not args.payload_file.endswith('.zip'):
             print("Error: Only ZIP archives are allowed with -f argument.")
             return
@@ -358,8 +365,6 @@ def embed_action(args):
     else:
         print("Error: Either -p or -f must be provided to specify the payload.")
         return
-
-    payload = payload.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
 
     # Adjust key by appending the hex length of the payload
     payload_byte_length = len(payload.encode('utf-8')) if isinstance(payload, str) else len(payload)
@@ -405,64 +410,331 @@ def embed_action(args):
         print(f"Stego image saved as \'{output_image_path}\'")
 
 
-def extract_action(args):
-    if not re.match(r"^[0-9A-Fa-f]+::", args.key):
-        print("Error: Invalid key format. Ensure the key has the correct hex length appended (e.g., '0000::key').")
+def xor_obfuscate(data, key):
+    return bytes([b ^ key for b in data])
+
+
+def xor_obfuscate_multi(data, values):
+    for val in values:
+        data = xor_obfuscate(data, val)
+    return data
+
+
+class PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    extracted_payload = None
+
+    def __init__(self, *args, echo=False, quiet=False, obfuscate=False, steg_obj=None, filename=None, **kwargs):
+        self.log_printed = False
+        self.echo = echo
+        self.quiet = quiet
+        self.obfuscate = obfuscate
+        self.steg_obj = steg_obj
+        self.filename = filename
+        super().__init__(*args, **kwargs)
+
+    def print_message(self, message):
+        if self.quiet:
+            return
+        else:
+            print(f"[{banner.Fore.CYAN}*{banner.Fore.RESET}] {message}")
+
+    def log_message(self, format, *args):
+        if not self.log_printed:
+            self.print_message(
+                f"Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}")
+            self.log_printed = True
+
+    def version_string(self):
+        return "Apache/2.4.29 (Ubuntu)"
+
+    def do_PUT(self):
+        if not self.log_printed:
+            self.log_message("Received %s request", self.command)
+            self.log_printed = True
+        content_length = int(self.headers['Content-Length'])
+        body = self.rfile.read(content_length)
+
+        with open(self.filename, 'wb') as f:
+            f.write(body)
+
+        # Extract the payload after receiving the stego image
+        PutHTTPRequestHandler.extracted_payload = self.steg_obj.extract_payload(self.filename)
+
+        # If the extracted payload is a ZIP archive, return an error message
+        if PutHTTPRequestHandler.extracted_payload[:4] == b'PK\x03\x04':
+            self.send_response(400)  # Bad Request
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            if self.echo:
+                self.wfile.write(b"Error: ZIP archive detected.")
+            else:
+                self.wfile.write(b" ")
+            self.server.stop = True
+            return
+
+        # If the payload isn't a ZIP archive, return the payload in the response
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        if self.echo:
+            if self.obfuscate:
+                obfuscated_payload = xor_obfuscate_multi(base64.b64encode(PutHTTPRequestHandler.extracted_payload),
+                                                         [0x55, 0xFF])
+                self.wfile.write(obfuscated_payload)
+            else:
+                self.wfile.write(PutHTTPRequestHandler.extracted_payload)
+        else:
+            self.wfile.write(b" ")
+        self.server.stop = True
+
+
+class PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+
+    def __init__(self, *args, quiet=False, filename=None, **kwargs):
+        self.quiet = quiet
+        self.log_printed = False
+        self.filename = filename
+        super().__init__(*args, **kwargs)
+
+    def print_message(self, message):
+        if self.quiet:
+            return
+        else:
+            print(f"[{banner.Fore.CYAN}*{banner.Fore.RESET}] {message}")
+
+    def log_message(self, format, *args):
+        if not self.log_printed:
+            self.print_message(
+                f"Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}")
+            self.log_printed = True
+
+    def do_GET(self):
+        if not self.log_printed:
+            self.log_message("Received %s request", self.command)
+            self.log_printed = True
+        if self.path == '/' + self.filename:
+            super().do_GET()
+            self.server.stop = True
+
+
+ZIP_SIGNATURE = b'PK\x03\x04'
+PNG_EXTENSION = '.png'
+TEXT_EXTENSIONS = ['.txt', '.py']
+BULLET = f'[{banner.Fore.CYAN}*{banner.Fore.RESET}]'
+
+
+def comment_bullet(quiet_val):
+    if not quiet_val:
+        msg_prefix = BULLET
+    else:
+        msg_prefix = '#'
+    return msg_prefix
+
+
+def print_error(message):
+    print(f"Error: {message}")
+
+
+def make_handler_class(quiet, filename, directory):
+    class CustomHandler(PayloadHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, quiet=quiet, filename=filename, directory=directory, **kwargs)
+
+    return CustomHandler
+
+
+def start_http_put_server(args, steg, filename):
+    echo_val = args.echo
+    quiet_val = args.quiet
+    obf_val = args.obfuscate
+    msg_prefix = comment_bullet(args.quiet)
+    handler = lambda *args: PutHTTPRequestHandler(*args, echo=echo_val, quiet=quiet_val,
+                                                  obfuscate=obf_val, steg_obj=steg, filename=filename)
+    httpd = socketserver.TCPServer((args.remote_stego_image[1], int(args.remote_stego_image[2])), handler)
+    httpd.timeout = 1
+    httpd.stop = False
+    print(
+        f"{msg_prefix} PUT server listening on http://{args.remote_stego_image[1]}:{args.remote_stego_image[2]}/")
+    try:
+        while not httpd.stop:
+            httpd.handle_request()
+        print(f"{msg_prefix} Connection closed.")
+    except KeyboardInterrupt:
+        print(f"{BULLET} KeyboardInterrupt: Aborting...")
+        httpd.server_close()
+        exit(0)
+
+
+def handle_http_server(args, lhost, lport, handler_class):
+    httpd = socketserver.TCPServer((lhost, lport), handler_class)
+    httpd.timeout = 1
+    httpd.stop = False
+    msg_prefix = comment_bullet(args.quiet)
+    print(f"{msg_prefix} GET server listening on http://{lhost}:{lport}/{args.remote_output_file[0]}")
+    try:
+        while not httpd.stop:
+            httpd.handle_request()
+        print(f"{msg_prefix} Connection closed.")
+    except KeyboardInterrupt:
+        print(f"{BULLET} KeyboardInterrupt: Connection closed.")
+        httpd.server_close()
         return
 
-    # Instantiate the ChaosEdgeSteg object with the provided key and original cover image path
-    steg = ChaosEdgeSteg(args.key, args.cover_image_path, '', False, args.verbose,
-                         args.debug, args.quiet)
 
-    # Extract the payload from the stego image
-    extracted_payload = steg.extract_payload(args.stego_image_path)
+def write_extracted_payload(payload, output_file_path, is_binary=True):
+    mode = 'wb' if is_binary else 'w'
+    with open(output_file_path, mode) as file:
+        file.write(payload)
 
-    # if os.name == 'nt':  # Check if on Windows
-    # extracted_payload = extracted_payload.replace(b'\n', b'\r\n')
 
-    # Check for ZIP file signature
-    if extracted_payload[:4] == b'PK\x03\x04':
-        # It's a ZIP payload
-        # Determine the output file path
-        if args.output_file:
-            output_file_path = args.output_file
-        else:
-            # If no output file path provided, use a default name and save in the current directory
-            output_file_path = 'extracted_payload.zip'
+def save_extracted_payload(extracted_payload, args):
+    if extracted_payload[:4] == ZIP_SIGNATURE:
+        output_file_path = args.output_file if args.output_file else 'extracted.zip'
         if not args.quiet:
             print(f"Extracted ZIP archive saved as \'{output_file_path}\'")
-
-        # Save the payload as a binary file
-        with open(output_file_path, 'wb') as file:
-            file.write(extracted_payload)
+        write_extracted_payload(extracted_payload, output_file_path, is_binary=True)
     else:
-        # It's a text payload
         extracted_text = extracted_payload.decode('utf-8', errors='replace')
         if not args.quiet and not args.output_file:
             print(f"Extracted payload: \n\n{extracted_text}\n")
-        else:
-            if args.execute:
-                encoded_script = base64.b64encode(extracted_text.encode("utf-8")).decode("utf-8")
-                tmp_ps_path = os.path.join(tempfile.gettempdir(), "tmp_ps.exe")
-                shutil.copy2('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\PowerShell.exe', tmp_ps_path)
-                ps_cmd = f"""{tmp_ps_path} -noprofile -noninteractive -Command \
-                [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded_script}')) | python"""
-                process = subprocess.Popen(ps_cmd, shell=True)
-                process.communicate()
-                os.remove(tmp_ps_path)
-            else:
-                if not args.output_file:
-                    print(extracted_text)
+        elif args.ps_execute:
+            execute_powershell_script(extracted_text)
+        elif not args.output_file:
+            print(extracted_text)
+
         if args.output_file:
-            if os.path.splitext(args.output_file)[1] not in ['.txt', '.py']:
+            if os.path.splitext(args.output_file)[1] not in TEXT_EXTENSIONS:
                 output_file_path = os.path.splitext(args.output_file)[0] + '.txt'
             else:
                 output_file_path = args.output_file
-            with open(output_file_path, 'w', newline='\n') as file:
-                file.write(extracted_text)
-                print(f"Extracted payload saved as \'{output_file_path}\'")
+            write_extracted_payload(extracted_text, output_file_path, is_binary=False)
+            print(f"Extracted payload saved as \'{output_file_path}\'")
+
+
+def execute_powershell_script(extracted_text):
+    encoded_script = base64.b64encode(extracted_text.encode("utf-8")).decode("utf-8")
+
+    # Check for PowerShell on Windows
+    if shutil.which("PowerShell.exe"):
+        ps_path = shutil.which("PowerShell.exe")
+        tmp_ps_path = os.path.join(tempfile.gettempdir(), "tmp_ps.exe")
+        shutil.copy2(ps_path, tmp_ps_path)
+        ps_cmd = f"""{tmp_ps_path} -noprofile -noninteractive -Command \
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded_script}')) | python"""
+        process = subprocess.Popen(ps_cmd, shell=True)
+        process.communicate()
+        os.remove(tmp_ps_path)
+
+    # Check for PowerShell Core on Linux
+    elif shutil.which("pwsh"):
+        ps_cmd = f"""pwsh -noprofile -noninteractive -Command \
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded_script}')) | python"""
+        process = subprocess.Popen(ps_cmd, shell=True)
+        process.communicate()
+
+    else:
+        print("Error: PowerShell or PowerShell Core not found on this system.")
+
+
+def handle_zip_payload(extracted_payload, args):
+    output_file_path = determine_output_file_path(args, 'extracted.zip')
+    if not args.quiet:
+        print(f"Extracted ZIP archive saved as \'{output_file_path}\'")
+    write_extracted_payload(extracted_payload, output_file_path, is_binary=True)
+
+
+def handle_text_payload(extracted_payload, args):
+    extracted_text = extracted_payload.decode('utf-8', errors='replace')
+    if args.obfuscate:
+        prefix = "Obfuscated p"
+    else:
+        prefix = "P"
+
+    if not (args.quiet or args.echo) and not args.output_file:
+        print(f"Extracted payload: \n\n{extracted_text}\n")
+    if args.echo:
+        print(f"{BULLET} {prefix}ayload echoed back to remote host.")
+    elif args.ps_execute:
+        execute_powershell_script(extracted_text)
+    elif not args.output_file and not args.echo:
+        print(extracted_text)
+    else:
+        return
+
+    if args.output_file:
+        if os.path.splitext(args.output_file)[1] not in TEXT_EXTENSIONS:
+            output_file_path = os.path.splitext(args.output_file)[0] + '.txt'
         else:
-            return
+            output_file_path = args.output_file
+        write_extracted_payload(extracted_text, output_file_path, is_binary=False)
+        print(f"Extracted payload saved as \'{output_file_path}\'")
+
+
+def serve_payload_via_http(extracted_payload, args):
+    if args.remote_output_file:
+        output_file_path, lhost, lport = args.remote_output_file
+        write_extracted_payload(extracted_payload, output_file_path, is_binary=True)
+        handler_class = make_handler_class(args.quiet, output_file_path, os.getcwd())
+        handle_http_server(args, lhost, int(lport), handler_class)
+        os.remove(output_file_path)
+        exit(0)
+
+
+def determine_output_file_path(args, default_filename):
+    if args.output_file:
+        return args.output_file
+    return default_filename
+
+
+def handle_remote_stego_image(args):
+    filename, lhost, lport = args.remote_stego_image
+    if os.path.splitext(filename)[1] != PNG_EXTENSION:
+        print_error("Invalid file format for stego image. Only '.png' images are supported.")
+        return
+
+    steg = ChaosEdgeSteg(args.key, args.cover_image_path, '', False, args.verbose, args.debug, args.quiet)
+    start_http_put_server(args, steg, filename)
+
+    extracted_payload = PutHTTPRequestHandler.extracted_payload if PutHTTPRequestHandler.extracted_payload \
+        else steg.extract_payload(filename)
+
+    if extracted_payload[:4] == ZIP_SIGNATURE:
+        handle_zip_payload(extracted_payload, args)
+    else:
+        handle_text_payload(extracted_payload, args)
+
+    serve_payload_via_http(extracted_payload, args)
+
+
+def handle_local_stego_image(args):
+    steg = ChaosEdgeSteg(args.key, args.cover_image_path, '', False, args.verbose, args.debug, args.quiet)
+    extracted_payload = steg.extract_payload(args.stego_image_path)
+
+    if extracted_payload[:4] == ZIP_SIGNATURE:
+        handle_zip_payload(extracted_payload, args)
+    else:
+        handle_text_payload(extracted_payload, args)
+
+    serve_payload_via_http(extracted_payload, args)
+
+
+def extract_action(args):
+    if not re.match(r"^[0-9A-Fa-f]+::", args.key):
+        print_error("Invalid key format. Ensure the key has the correct hex length appended (e.g., '0000::key').")
+        return
+    if args.ps_execute and (args.echo or args.remote_output_file):
+        print_error("The --ps_execute option cannot be used with remote options.")
+        return
+    if args.ps_execute and not args.quiet:
+        args.quiet = True
+    if args.echo and not args.remote_stego_image:
+        print_error("--echo can only be used with -iR/--remote_stego_image")
+        return
+
+    if args.remote_stego_image:
+        handle_remote_stego_image(args)
+    else:
+        handle_local_stego_image(args)
 
 
 def main_cli():
@@ -492,21 +764,34 @@ def main_cli():
     extract_parser = subparsers.add_parser('extract', help='Extract payload from a stego image.')
     extract_parser.add_argument('-c', '--cover_image_path', required=True,
                                 help='Path to the original cover image used during embedding.')
-    extract_parser.add_argument('-i', '--stego_image_path', required=True,
-                                help='Path to the stego image from which to extract the payload.')
+    stego_image = extract_parser.add_mutually_exclusive_group(required=True)
+    stego_image.add_argument('-i', '--stego_image_path', type=str,
+                             help='Path to the stego image from which to extract the payload.')
+    stego_image.add_argument('-iR', '--remote_stego_image', nargs=3, metavar=('FILENAME', 'LHOST', 'LPORT'),
+                             help='Start HTTP PUT server to receive stego image.')
     extract_parser.add_argument('-k', '--key', required=True,
                                 help='Key used during embedding, with the payload length appended (e.g., '
-                                     '"0000::key").')
-    extract_parser.add_argument('-o', '--output_file', default=None,
+                                     '\'0000::key\').')
+    extract_output = extract_parser.add_mutually_exclusive_group()
+    extract_output.add_argument('-o', '--output_file', default=None,
                                 help='Path to save the extracted payload. If not specified, '
                                      'the message is printed to the console.')
+    extract_output.add_argument('-oR', '--remote_output_file', nargs=3, metavar=('FILENAME', 'LHOST', 'LPORT'),
+                                help='Save extracted payload and serve it for download.')
+    echo_group = extract_parser.add_argument_group('Echo options', 'Options related to echoing back the payload.')
+    echo_group.add_argument('--echo', action='store_true', default=False,
+                            help='Echo back responses to remote client. Only used with [-iR/--remote_stego_image]')
+    obfuscate_group = echo_group.add_mutually_exclusive_group(required=False)
+    obfuscate_group.add_argument('--obfuscate', action='store_true', default=False,
+                                 help='Obfuscate the echoed payload. Requires --echo.')
     extract_parser.add_argument('--save_bitmaps', action='store_true', default=False, help='Save edge bitmaps.')
-    extract_parser.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output.')
-    extract_parser.add_argument('-vv', '--debug', action='store_true', default=False, help='Enable debug output.')
+    verbosity = extract_parser.add_mutually_exclusive_group()
+    verbosity.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output.')
+    verbosity.add_argument('-vv', '--debug', action='store_true', default=False, help='Enable debug output.')
     extract_parser.add_argument('-q', '--quiet', action='store_true', default=False, help='Suppress output messages.')
-    extract_parser.add_argument('-x', '--execute', action='store_true', default=False,
-                                help='Execute the extracted payload as a python script. '
-                                     f'Payload must be a \'.py\' file.')
+    extract_parser.add_argument('-psx', '--ps_execute', action='store_true', default=False,
+                                help='Execute the extracted payload in a temporary PowerShell instance. '
+                                     f'Payload must be a \'.py\' file or Python code.')
     extract_parser.set_defaults(func=extract_action)
 
     args = parser.parse_args()
@@ -517,10 +802,7 @@ def main_cli():
         parser.print_help()
         sys.exit(1)
 
-    if hasattr(args, 'execute') and args.execute and not args.quiet:
-        args.quiet = True
-
-    if hasattr(args, 'quiet') and not args.quiet:
+    if not args.quiet:
         print(__header__)
 
     args.func(args)

