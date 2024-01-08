@@ -32,13 +32,7 @@ Where \(a\) and \(b\) are constants. For ChaosEdgeSteg, we utilize typical value
 
 - **Defense in Depth:** Requires possession of the key, payload length, and original cover image in order to extract steganographic content. Keys are checked against an embedded SHA256 hash as an additional validation mechanism.
 
-- **Remote Extraction:** Provides options for covert extraction of data via remote hosts, enabling versatility in restrictive environments.
-
-- **Temp PowerShell Execution:** Provides options to execute extracted Python code filelessly in a temporary PowerShell instance, maximizing impact while minimizing footprints.
-
-- **ZIP Archive Support:** Provides support for ZIP archive embedding, allowing users to hide multiple files of any file type within an image (Usually requires larger cover images).
-
-- **Quiet Mode:** Provides options to suppress dialogue messages, allowing output to be piped to other command-line tools in an obfuscated way.
+- **Remote Extraction:** Provides options for payload extraction via remote hosts, enabling versatility in restrictive environments.
 
 ## Installation
 
