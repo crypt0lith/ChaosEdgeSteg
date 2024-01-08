@@ -344,7 +344,7 @@ class ChaosEdgeSteg:
 def embed_action(args):
     # Check for mutual exclusivity of -p and -f
     if args.payload and args.payload_file:
-        print("Error: Cannot use -p and -f simultaneously. Choose one method to provide the payload.")
+        print(f"Error: Cannot use \'-p\' and \'-f\' simultaneously. Choose one method to provide the payload.")
         return
     elif args.payload:
         if os.path.isfile(args.payload) and args.payload.endswith(('.txt', '.py')):
@@ -355,15 +355,15 @@ def embed_action(args):
             payload = args.payload.encode()
     elif args.payload_file:
         if not os.path.isfile(args.payload_file):
-            print(f"Error: File does not exist \'{os.path.abspath(args.payload_file)}\'")
+            print(f"Error: File does not exist: \'{os.path.abspath(args.payload_file)}\'")
             return
         if not args.payload_file.endswith('.zip'):
-            print("Error: Only ZIP archives are allowed with -f argument.")
+            print("Error: Invalid payload file type. Only ZIP archives are supported.")
             return
         with open(args.payload_file, 'rb') as file:
             payload = file.read()
     else:
-        print("Error: Either -p or -f must be provided to specify the payload.")
+        print("Error: Either \'-p\' or \'-f\' must be provided to specify the payload.")
         return
 
     # Adjust key by appending the hex length of the payload
@@ -581,6 +581,16 @@ def handle_http_server(args, lhost, lport, handler_class):
         return
 
 
+def serve_payload_via_http(extracted_payload, args):
+    if args.remote_output_file:
+        output_file_path, lhost, lport = args.remote_output_file
+        write_extracted_payload(extracted_payload, output_file_path, is_binary=True)
+        handler_class = make_handler_class(args.quiet, output_file_path, os.getcwd())
+        handle_http_server(args, lhost, int(lport), handler_class)
+        os.remove(output_file_path)
+        exit(0)
+
+
 def write_extracted_payload(payload, output_file_path, is_binary=True):
     mode = 'wb' if is_binary else 'w'
     with open(output_file_path, mode) as file:
@@ -646,14 +656,14 @@ def handle_zip_payload(extracted_payload, args):
 def handle_text_payload(extracted_payload, args):
     extracted_text = extracted_payload.decode('utf-8', errors='replace')
     if args.obfuscate:
-        prefix = "Obfuscated p"
+        prefix = "Obfuscated payload"
     else:
-        prefix = "P"
+        prefix = "Payload"
 
     if not (args.quiet or args.echo) and not args.output_file:
         print(f"Extracted payload: \n\n{extracted_text}\n")
     if args.echo:
-        print(f"{BULLET} {prefix}ayload echoed back to remote host.")
+        print(f"{BULLET} {prefix} echoed back to remote host.")
     elif args.ps_execute:
         execute_powershell_script(extracted_text)
     elif not args.output_file and not args.echo:
@@ -668,16 +678,6 @@ def handle_text_payload(extracted_payload, args):
             output_file_path = args.output_file
         write_extracted_payload(extracted_text, output_file_path, is_binary=False)
         print(f"Extracted payload saved as \'{output_file_path}\'")
-
-
-def serve_payload_via_http(extracted_payload, args):
-    if args.remote_output_file:
-        output_file_path, lhost, lport = args.remote_output_file
-        write_extracted_payload(extracted_payload, output_file_path, is_binary=True)
-        handler_class = make_handler_class(args.quiet, output_file_path, os.getcwd())
-        handle_http_server(args, lhost, int(lport), handler_class)
-        os.remove(output_file_path)
-        exit(0)
 
 
 def determine_output_file_path(args, default_filename):
@@ -720,15 +720,15 @@ def handle_local_stego_image(args):
 
 def extract_action(args):
     if not re.match(r"^[0-9A-Fa-f]+::", args.key):
-        print_error("Invalid key format. Ensure the key has the correct hex length appended (e.g., '0000::key').")
+        print_error(f"Invalid key format. Ensure the key has the correct hex length appended (e.g., \'0000::key\').")
         return
     if args.ps_execute and (args.echo or args.remote_output_file):
-        print_error("The --ps_execute option cannot be used with remote options.")
+        print_error(f"The \'--ps_execute\' option cannot be used with remote options.")
         return
     if args.ps_execute and not args.quiet:
         args.quiet = True
     if args.echo and not args.remote_stego_image:
-        print_error("--echo can only be used with -iR/--remote_stego_image")
+        print_error(f"\'--echo\' can only be used with \'-iR/--remote_stego_image\'")
         return
 
     if args.remote_stego_image:
