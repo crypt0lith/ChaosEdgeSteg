@@ -48,6 +48,8 @@ class ChaosEdgeSteg:
         self.image_path = image_path
         if output_path:
             self.output_dir = os.path.dirname(output_path)
+        else:
+            self.output_dir = os.getcwd()
         self.image = cv2.imread(image_path)
         self.a, self.b = self.generate_henon_parameters_from_key(actual_key)
         self.henon_x, self.henon_y = self.generate_henon_map()
