@@ -663,15 +663,13 @@ def handle_text_payload(extracted_payload, args):
         prefix = "Payload"
 
     if not (args.quiet or args.echo) and not args.output_file:
-        print(f"Extracted payload: \n\n{extracted_text}\n")
+        print(f"\nExtracted payload:\n")
     if args.echo:
         print(f"{BULLET} {prefix} echoed back to remote host.")
     elif args.ps_execute:
         execute_powershell_script(extracted_text)
-    elif not args.output_file and not args.echo:
-        print(extracted_text)
     else:
-        return
+        print(f"{extracted_text}")
 
     if args.output_file:
         if os.path.splitext(args.output_file)[1] not in TEXT_EXTENSIONS:
@@ -691,7 +689,7 @@ def determine_output_file_path(args, default_filename):
 def handle_remote_stego_image(args):
     filename, lhost, lport = args.remote_stego_image
     if os.path.splitext(filename)[1] != PNG_EXTENSION:
-        print_error("Invalid file format for stego image. Only '.png' images are supported.")
+        print_error(f"Invalid file format for stego image. Only \'.png\' images are supported.")
         return
 
     steg = ChaosEdgeSteg(args.key, args.cover_image_path, '', False, args.verbose, args.debug, args.quiet)
