@@ -119,8 +119,7 @@ class ChaosEdgeSteg:
         threshold_scale = 1 - combined_density  # Scale the thresholds towards min values
         _lower = int(base_lower + threshold_scale * (min_lower - base_lower))
         _upper = int(base_upper + threshold_scale * (min_upper - base_upper))
-        self._print_msg(f'Thresholds after combined density adjustment: {_lower, _upper}',
-                        msg_type='debug')
+        self._print_msg(f'Thresholds after combined density adjustment: {_lower, _upper}', msg_type='debug')
         return _lower, _upper
 
     def _get_edges(self, image):
@@ -171,12 +170,9 @@ class ChaosEdgeSteg:
         self._print_msg('Mapping chaotic trajectory to edge coordinates...')
         available_edge_mask = np.ones(len(edge_coords), dtype=bool)
         final_edge_coords = []
-        for index in tqdm(norm_indices[:, 0],
-                          total=len(norm_indices),
-                          disable=self.quiet,
-                          bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]',
-                          ascii='.#',
-                          leave=False):
+        for index in tqdm(
+                norm_indices[:, 0], total=len(norm_indices), disable=self.quiet,
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]', ascii='.#', leave=False):
             original_index = index  # Store original index to check for full loop without available edge
             while not available_edge_mask[index]:
                 index = (index + 1) % len(edge_coords)
@@ -247,8 +243,7 @@ class ChaosEdgeSteg:
             out_bits.append(str(out_bit))
             mod_channels[coord_key] = channel + 1
         out_str = ''.join(out_bits)
-        out_bin_payload = int(
-            out_str, 2).to_bytes((len(out_str) + 7) // 8, byteorder='big')
+        out_bin_payload = int(out_str, 2).to_bytes((len(out_str) + 7) // 8, byteorder='big')
         out_bin_key_hash = out_bin_payload[:32]
         out_key_hash = out_bin_key_hash.hex()
         s_key = f'{self.len_flag}::{self.key}'.encode()
@@ -280,8 +275,7 @@ class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):
         if not self.log_printed:
-            self._print_msg(
-                f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
+            self._print_msg(f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
             self.log_printed = True
 
     def version_string(self):
@@ -316,8 +310,7 @@ class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         if self.echo:
             if self.obfuscate:
-                obf_payload = xor_obf(base64.b64encode(_PutHTTPRequestHandler.out_payload),
-                                      [0x55, 0xFF])
+                obf_payload = xor_obf(base64.b64encode(_PutHTTPRequestHandler.out_payload), [0x55, 0xFF])
                 self.wfile.write(obf_payload)
             else:
                 self.wfile.write(_PutHTTPRequestHandler.out_payload)
@@ -327,7 +320,6 @@ class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 
 class _PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-
     def __init__(self, *args, quiet=False, filename=None, **kwargs):
         self.quiet = quiet
         self.log_printed = False
@@ -340,8 +332,7 @@ class _PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, format, *args):
         if not self.log_printed:
-            self._print_msg(
-                f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
+            self._print_msg(f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
             self.log_printed = True
 
     def do_GET(self):
@@ -358,6 +349,7 @@ def _make_handler_class(quiet, filename, directory):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, quiet=quiet, filename=filename, directory=directory, **kwargs)
 
+
     return CustomHandler
 
 
@@ -365,13 +357,12 @@ def _start_http_put_server(args, steg, filename):
     echo_val = args.echo
     obf_val = args.obfuscate
     msg_prefix = f'[{Fore.CYAN}*{RESET}]' if not args.quiet else '#'
-    handler = lambda *args: _PutHTTPRequestHandler(*args,
-                                                   echo=echo_val, obfuscate=obf_val, steg_obj=steg, filename=filename)
+    handler = lambda *args: _PutHTTPRequestHandler(
+        *args, echo=echo_val, obfuscate=obf_val, steg_obj=steg, filename=filename)
     httpd = socketserver.TCPServer((args.remote_stego_image[1], int(args.remote_stego_image[2])), handler)
     httpd.timeout = 1
     httpd.stop = False
-    print(
-        f'{msg_prefix} PUT server listening on http://{args.remote_stego_image[1]}:{args.remote_stego_image[2]}/')
+    print(f'{msg_prefix} PUT server listening on http://{args.remote_stego_image[1]}:{args.remote_stego_image[2]}/')
     try:
         while not httpd.stop:
             httpd.handle_request()
@@ -497,8 +488,9 @@ def _embed(args):
     adjusted_length = payload_byte_length + 32
     hex_length = f'{adjusted_length:04X}'
     adjusted_key = f'{hex_length}::{args.key}'
-    steg = ChaosEdgeSteg(adjusted_key, args.cover_image_path, args.output_image_path, args.save_bitmaps, args.verbose,
-                         args.debug, args.quiet)
+    steg = ChaosEdgeSteg(
+        adjusted_key, args.cover_image_path, args.output_image_path, args.save_bitmaps, args.verbose, args.debug,
+        args.quiet)
     stego_image = steg.embed(args.cover_image_path, payload)
     if args.save_key:
         if args.output_image_path:
@@ -516,8 +508,8 @@ def _embed(args):
         output_img_path = os.path.splitext(args.output_image_path)[0] + '.png'
     else:
         _dir = os.getcwd()
-        output_img_path = os.path.join(_dir,
-                                       f'stego_{os.path.splitext(os.path.basename(args.cover_image_path))[0]}.png')
+        output_img_path = os.path.join(
+            _dir, f'stego_{os.path.splitext(os.path.basename(args.cover_image_path))[0]}.png')
     cv2.imwrite(output_img_path, stego_image)
     if not args.quiet:
         print(f"Stego image saved as '{output_img_path}'")
@@ -531,8 +523,8 @@ def _extract(args):
                 "Invalid file format for stego image: Only '.png' images are supported.")
         steg = ChaosEdgeSteg(args.key, args.cover_image_path, '', False, args.verbose, args.debug, args.quiet)
         _start_http_put_server(args, steg, filename)
-        extracted_payload = _PutHTTPRequestHandler.out_payload if _PutHTTPRequestHandler.out_payload \
-            else steg.extract(filename)
+        extracted_payload = _PutHTTPRequestHandler.out_payload if _PutHTTPRequestHandler.out_payload else steg.extract(
+            filename)
         _handle_payload(extracted_payload, args)
         _serve_http_payload(extracted_payload, args)
 
@@ -544,7 +536,7 @@ def _extract(args):
 
     if not re.match(r"^[0-9A-Fa-f]+::", args.key):
         raise ValueError(
-            "Unexpected key format: Does not match '[HEX_LENGTH]::[KEY]'")
+            f"Unexpected key format: Does not match '[HEX_LENGTH]::[KEY]': '{args.key}'")
     if args.ps_execute and (args.echo or args.remote_output_file):
         raise ArgumentError(
             "'ps_execute': Cannot be used with remote options")
@@ -562,16 +554,18 @@ def main_cli():
     # Embed action arguments
     embed_parser = subparsers.add_parser('embed', help='Embed payload into an image')
     embed_parser.add_argument('-c', '--cover_image_path', required=True, help='Path to the cover image')
-    embed_parser.add_argument('-p', '--payload', type=str,
-                              help='Payload to embed directly into the image as a string. '
-                                   f'Can also be a filepath (\'.txt\', \'.py\')')
+    embed_parser.add_argument(
+        '-p', '--payload', type=str, help='Payload to embed directly into the image as a string. '
+                                          f'Can also be a filepath (\'.txt\', \'.py\')')
     embed_parser.add_argument('-f', '--payload_file', type=str, help='Path to the payload file (\'.zip\' archive)')
     embed_parser.add_argument('-k', '--key', required=True, help='Key to use for embedding')
-    embed_parser.add_argument('-o', '--output_image_path', default=None,
-                              help='Path to save the output stego image. If not specified, defaults to '
-                                   '\'stego_<cover_image_name>\'')
-    embed_parser.add_argument('--save_key', action='store_true', default=False, help='Save key as a text file in the '
-                                                                                     'output directory')
+    embed_parser.add_argument(
+        '-o', '--output_image_path', default=None,
+        help='Path to save the output stego image. If not specified, defaults to '
+             '\'stego_<cover_image_name>\'')
+    embed_parser.add_argument(
+        '--save_key', action='store_true', default=False, help='Save key as a text file in the '
+                                                               'output directory')
     embed_parser.add_argument('--save_bitmaps', action='store_true', default=False, help='Save edge bitmaps')
     embed_parser.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output')
     embed_parser.add_argument('-vv', '--debug', action='store_true', default=False, help='Enable debug output')
@@ -579,36 +573,40 @@ def main_cli():
     embed_parser.set_defaults(func=_embed)
     # Extract action arguments
     extract_parser = subparsers.add_parser('extract', help='Extract payload from a stego image')
-    extract_parser.add_argument('-c', '--cover_image_path', required=True,
-                                help='Path to the original cover image used during embedding')
+    extract_parser.add_argument(
+        '-c', '--cover_image_path', required=True, help='Path to the original cover image used during embedding')
     stego_image = extract_parser.add_mutually_exclusive_group(required=True)
-    stego_image.add_argument('-i', '--stego_image_path', type=str,
-                             help='Path to the stego image from which to extract the payload.')
-    stego_image.add_argument('-iR', '--remote_stego_image', nargs=3, metavar=('FILENAME', 'LHOST', 'LPORT'),
-                             help='Start HTTP PUT server to receive stego image')
-    extract_parser.add_argument('-k', '--key', required=True,
-                                help='Key used during embedding, with the payload length appended (e.g., '
-                                     '\'0000::key\')')
+    stego_image.add_argument(
+        '-i', '--stego_image_path', type=str, help='Path to the stego image from which to extract the payload.')
+    stego_image.add_argument(
+        '-iR', '--remote_stego_image', nargs=3, metavar=('FILENAME', 'LHOST', 'LPORT'),
+        help='Start HTTP PUT server to receive stego image')
+    extract_parser.add_argument(
+        '-k', '--key', required=True, help='Key used during embedding, with the payload length appended (e.g., '
+                                           '\'0000::key\')')
     extract_output = extract_parser.add_mutually_exclusive_group()
-    extract_output.add_argument('-o', '--output_file', default=None,
-                                help='Path to save the extracted payload. If not specified, '
-                                     'the message is printed to the console')
-    extract_output.add_argument('-oR', '--remote_output_file', nargs=3, metavar=('FILENAME', 'LHOST', 'LPORT'),
-                                help='Save extracted payload and serve it for download.')
+    extract_output.add_argument(
+        '-o', '--output_file', default=None, help='Path to save the extracted payload. If not specified, '
+                                                  'the message is printed to the console')
+    extract_output.add_argument(
+        '-oR', '--remote_output_file', nargs=3, metavar=('FILENAME', 'LHOST', 'LPORT'),
+        help='Save extracted payload and serve it for download.')
     echo_group = extract_parser.add_argument_group('Echo options', 'Options related to echoing back the payload')
-    echo_group.add_argument('--echo', action='store_true', default=False,
-                            help='Echo back responses to remote client. Only used with [-iR/--remote_stego_image]')
+    echo_group.add_argument(
+        '--echo', action='store_true', default=False,
+        help='Echo back responses to remote client. Only used with [-iR/--remote_stego_image]')
     obfuscate_group = echo_group.add_mutually_exclusive_group(required=False)
-    obfuscate_group.add_argument('--obfuscate', action='store_true', default=False,
-                                 help='Obfuscate the echoed payload. Requires \'--echo\'')
+    obfuscate_group.add_argument(
+        '--obfuscate', action='store_true', default=False, help='Obfuscate the echoed payload. Requires \'--echo\'')
     extract_parser.add_argument('--save_bitmaps', action='store_true', default=False, help='Save edge bitmaps')
     verbosity = extract_parser.add_mutually_exclusive_group()
     verbosity.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output')
     verbosity.add_argument('-vv', '--debug', action='store_true', default=False, help='Enable debug output')
     extract_parser.add_argument('-q', '--quiet', action='store_true', default=False, help='Suppress output messages')
-    extract_parser.add_argument('-psx', '--ps_execute', type=str, default=False,
-                                help='Executes the extracted payload in a temp PowerShell instance. '
-                                     'Valid params: (\'python\', \'pwsh\')')
+    extract_parser.add_argument(
+        '-psx', '--ps_execute', type=str, default=False,
+        help='Executes the extracted payload in a temp PowerShell instance. Valid params: ('
+             '\'python\', \'pwsh\')')
     extract_parser.set_defaults(func=_extract)
     args = parser.parse_args()
     _header = header()
