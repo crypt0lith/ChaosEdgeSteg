@@ -29,7 +29,7 @@ Where \(a\) and \(b\) are constants. For `ChaosEdgeSteg`, we utilize typical val
 
 - **Edge Adaptive Embedding**: Prioritizes edges for embedding, making the embedded information less perceptible.
 
-    - **Contextual Thresholding**: Adaptively optimizes edge detection thresholds based on both image and payload size, further concealing the presence of the payload.
+	- **Contextual Thresholding**: Adaptively optimizes edge detection thresholds based on both image and payload size, further concealing the presence of the payload.
 
 - **Enhanced Payload Security**: Requires possession of the key, payload length, and original cover image in order to extract steganographic content. Keys are checked against an embedded SHA256 hash as an additional validation mechanism.
 
@@ -40,28 +40,33 @@ Where \(a\) and \(b\) are constants. For `ChaosEdgeSteg`, we utilize typical val
 To use `ChaosEdgeSteg`, you can clone the repository:
 
 ```bash  
-git clone https://github.com/crypt0lith/ChaosEdgeSteg.gitcd ChaosEdgeSteg```  
-  
-After cloning the repository, install the required dependencies:  
-  
+git clone https://github.com/crypt0lith/ChaosEdgeSteg.git
+cd ChaosEdgeSteg
+```  
+
+After cloning the repository, install the required dependencies:
+
 ```bash  
-pip install -r requirements.txt```  
-  
-## Usage  
-  
-### Embedding Payload  
-  
+pip install -r requirements.txt
+```  
+
+## Usage
+
+### Embedding Payload
+
 ```bash  
-python -m chaosedgesteg embed [-v/-vv] -c <cover_image_path> -f <payload_file> -k 'secret_key' [-o <output_image_path>] [-q] [--save_key] [--save_bitmaps]```  
-  
-### Extracting Payload  
-  
+python -m chaosedgesteg embed [-v/-vv] -c <cover_image_path> -f <payload_file> -k 'secret_key' [-o <output_image_path>] [-q] [--save_key] [--save_bitmaps]
+```  
+
+### Extracting Payload
+
 ```bash  
-python -m chaosedgesteg extract [-v/-vv] -c <cover_image_path> -i <stego_image_path> -k '0000::secret_key' [-o <output_file>] [-q] [-psx]```  
+python -m chaosedgesteg extract [-v/-vv] -c <cover_image_path> -i <stego_image_path> -k '0000::secret_key' [-o <output_file>] [-q] [-psx]
+```  
 <br>  
-  
-#### Remote Extraction  
-  
+
+#### Remote Extraction
+
 ```bash  
 python -m chaosedgesteg extract -c <cover_image_path> -iR stego_image.png <LHOST> <LPORT> -k '0000::secret_key' [-oR <output_file> <LHOST> <LPORT>] [--echo] [--obfuscate]  
 ```  
@@ -71,7 +76,8 @@ python -m chaosedgesteg extract -c <cover_image_path> -iR stego_image.png <LHOST
 From a remote host, upload the stego image using `curl --upload-file`:
 
 ```bash  
-curl --upload-file stego_image.png http://PUT_SERVER_IP:4444/```  
+curl --upload-file stego_image.png http://PUT_SERVER_IP:4444/
+```  
   
   
 - Use `-iR` with `--echo` to send the payload back to the remote host in plaintext:  
@@ -89,4 +95,5 @@ Similar to `-iR`, `-oR <output_file> <LHOST> <LPORT>` can be used to instantiate
 From a remote host, download the extracted file using the `wget` command:  
   
 ```bash  
-wget http://GET_SERVER_IP:4884/extracted.zip```
+wget http://GET_SERVER_IP:4884/extracted.zip
+```
