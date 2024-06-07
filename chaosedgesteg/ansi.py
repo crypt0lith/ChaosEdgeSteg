@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # coding:UTF-8
-__all__ = ['header', 'Fore', 'RESET']
+__all__ = ['header', 'Fore']
 
 import ctypes
 import os
 import re
 
 
-def enable_vt_processing():
+def enable_vt_processing() -> bool:
     _ansi_256_enabled = {'ANSICON', 'COLORTERM', 'ConEmuANSI', 'PYCHARM_HOSTED', 'TERM', 'TERMINAL_EMULATOR',
                          'TERM_PROGRAM', 'WT_SESSION'}
     _ansi_256_enabled.intersection_update(set(list(os.environ.keys())))
@@ -27,30 +27,30 @@ def enable_vt_processing():
     return True
 
 
-ansi_256_enabled = bool(enable_vt_processing())
-RESET = '\033[0m'
+ANSI256_ENABLED = enable_vt_processing()
 
 
 class Fore:
-    CYAN = '\033[38;5;14m' if ansi_256_enabled else '\033[36m'
-    RED = '\033[38;5;9m' if ansi_256_enabled else '\033[31m'
+    RESET = '\033[0m'
+    CYAN = '\033[38;5;14m' if ANSI256_ENABLED else '\033[36m'
+    RED = '\033[38;5;9m' if ANSI256_ENABLED else '\033[31m'
 
 
-def adjust_ansi_codes(_text):
-    if not ansi_256_enabled:
+def adjust_ansi_codes(__s: str):
+    if not ANSI256_ENABLED:
         ansi_reg_codes = {
             '\033[38;5;9m': '\033[31m',
             '\033[38;5;15m': '\033[37m',
             '\033[38;5;8m': '\033[90m'
         }
-        ansi_256_codes = re.findall(r'\x1B[@-_][0-?]*[ -/]*[@-~]', _text)
+        ansi_256_codes = re.findall(r'\x1B[@-_][0-?]*[ -/]*[@-~]', __s)
         ansi_256_unique = []
         for i in ansi_256_codes:
             if not ansi_reg_codes.get(i) or i in ansi_256_unique:
                 continue
             ansi_256_unique.append(i)
-            _text = _text.replace(i, ansi_reg_codes[i])
-    return _text
+            __s = __s.replace(i, ansi_reg_codes[i])
+    return __s
 
 
 def header():

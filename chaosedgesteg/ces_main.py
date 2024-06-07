@@ -19,14 +19,10 @@ import numpy as np
 from mpmath import mp
 from tqdm import tqdm
 
-from banner import *
+from ansi import *
 
 
 class SteganographyError(Exception):
-    pass
-
-
-class ArgumentError(Exception):
     pass
 
 
@@ -60,7 +56,7 @@ class ChaosEdgeSteg:
         elif msg_type == 'verbose' and self.verbose:
             print(f'[*] {message}')
         elif msg_type == 'regular':
-            print(f'[{Fore.RED}*{RESET}] {message}')
+            print(f'[{Fore.RED}*{Fore.RESET}] {message}')
 
     @staticmethod
     def _sha256_hashgen(data):
@@ -271,7 +267,7 @@ class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _print_msg(self, message):
         if not self.quiet:
-            print(f'[{Fore.CYAN}*{RESET}] {message}')
+            print(f'[{Fore.CYAN}*{Fore.RESET}] {message}')
 
     def log_message(self, format, *args):
         if not self.log_printed:
@@ -328,7 +324,7 @@ class _PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def _print_msg(self, message):
         if not self.quiet:
-            print(f'[{Fore.CYAN}*{RESET}] {message}')
+            print(f'[{Fore.CYAN}*{Fore.RESET}] {message}')
 
     def log_message(self, format, *args):
         if not self.log_printed:
@@ -356,7 +352,7 @@ def _make_handler_class(quiet, filename, directory):
 def _start_http_put_server(args, steg, filename):
     echo_val = args.echo
     obf_val = args.obfuscate
-    msg_prefix = f'[{Fore.CYAN}*{RESET}]' if not args.quiet else '#'
+    msg_prefix = f'[{Fore.CYAN}*{Fore.RESET}]' if not args.quiet else '#'
     handler = lambda *args: _PutHTTPRequestHandler(
         *args, echo=echo_val, obfuscate=obf_val, steg_obj=steg, filename=filename)
     httpd = socketserver.TCPServer((args.remote_stego_image[1], int(args.remote_stego_image[2])), handler)
@@ -377,7 +373,7 @@ def _handle_http_server(args, lhost, lport, handler_class):
     httpd = socketserver.TCPServer((lhost, lport), handler_class)
     httpd.timeout = 1
     httpd.stop = False
-    msg_prefix = f'[{Fore.CYAN}*{RESET}]' if not args.quiet else '#'
+    msg_prefix = f'[{Fore.CYAN}*{Fore.RESET}]' if not args.quiet else '#'
     print(f'{msg_prefix} GET server listening on http://{lhost}:{lport}/{args.remote_output_file[0]}')
     try:
         while not httpd.stop:
@@ -428,7 +424,7 @@ def _exec_ps(extracted_text, suffix):
         process = subprocess.Popen(ps_cmd, shell=True)
         process.communicate()
     else:
-        raise ArgumentError(
+        raise ValueError(
             "'ps_execute': Unable to find 'PowerShell' or 'PowerShell Core' on this system")
 
 
@@ -445,7 +441,7 @@ def _handle_payload(extracted_payload, args):
         if not (args.quiet or args.echo) and not args.output_file:
             print('\nExtracted payload:\n')
         if args.echo:
-            print(f'[{Fore.CYAN}*{RESET}] {prefix} echoed back to remote host')
+            print(f'[{Fore.CYAN}*{Fore.RESET}] {prefix} echoed back to remote host')
         elif args.ps_execute:
             _exec_ps(extracted_text, args.ps_execute)
         else:
@@ -538,18 +534,19 @@ def _extract(args):
         raise ValueError(
             f"Unexpected key format: Does not match '[HEX_LENGTH]::[KEY]': '{args.key}'")
     if args.ps_execute and (args.echo or args.remote_output_file):
-        raise ArgumentError(
+        raise ValueError(
             "'ps_execute': Cannot be used with remote options")
     if args.ps_execute and not args.quiet:
         args.quiet = True
     if args.echo and not args.remote_stego_image:
-        raise ArgumentError(
+        raise ValueError(
             "'echo': Can only be used with 'remote_stego_image'")
     handle_remote() if args.remote_stego_image else handle_local()
 
 
 def main_cli():
-    parser = argparse.ArgumentParser(description='ChaosEdgeSteg: A chaos-based edge adaptive steganography tool')
+    parser = argparse.ArgumentParser(
+        prog='python -m chaosedgesteg', description='ChaosEdgeSteg: A chaos-based edge adaptive steganography tool')
     subparsers = parser.add_subparsers()
     # Embed action arguments
     embed_parser = subparsers.add_parser('embed', help='Embed payload into an image')
@@ -617,7 +614,3 @@ def main_cli():
     if not args.quiet:
         print(_header)
     args.func(args)
-
-
-if __name__ == '__main__':
-    main_cli()
