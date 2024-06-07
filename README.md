@@ -62,8 +62,7 @@ python -m chaosedgesteg embed [-v/-vv] -c <cover_image_path> -f <payload_file> -
 
 ```bash  
 python -m chaosedgesteg extract [-v/-vv] -c <cover_image_path> -i <stego_image_path> -k '0000::secret_key' [-o <output_file>] [-q] [-psx]
-```  
-<br>  
+```
 
 #### Remote Extraction
 
