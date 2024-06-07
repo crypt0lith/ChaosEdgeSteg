@@ -54,7 +54,7 @@ def adjust_ansi_codes(__s: str):
 
 
 def header():
-    with open('header.bin', 'rb') as f:
+    with open(os.path.join(os.path.dirname(__file__), 'header.bin'), 'rb') as f:
         _header = str(f.read().decode('utf-8'))
     return adjust_ansi_codes(_header)
 
