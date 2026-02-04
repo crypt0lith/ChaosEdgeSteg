@@ -1,4 +1,0 @@
-opencv-python~=4.8.0.74
-numpy~=1.25.2
-tqdm~=4.66.1
-mpmath~=1.3.0
