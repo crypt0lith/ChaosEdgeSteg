@@ -5,16 +5,20 @@ import base64
 import http.server
 import os
 import socketserver
+import sys
 from typing import Union
 
 import cv2
 import numpy as np
 
-from .ansi import Fore, header
-
 
 class SteganographyError(Exception):
     pass
+
+
+CYAN = "\x1b[36m"
+RED = "\x1b[31m"
+RESET = "\x1b[0m"
 
 
 class ChaosEdgeSteg:
@@ -42,8 +46,8 @@ class ChaosEdgeSteg:
         elif msg_type == 'verbose' and self.verbose:
             print(f'[*] {message}')
         elif msg_type == 'regular':
-            print(f'[{Fore.RED}*{Fore.RESET}] {message}')
-
+            print(f'[{RED}*{RESET}] {message}')
+    
     @staticmethod
     def sha256_hashgen(__o: Union[str, bytes]):
         from hashlib import sha256
@@ -270,9 +274,9 @@ class PutHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def print_message(self, message):
         if not self.quiet:
-            print(f'[{Fore.CYAN}*{Fore.RESET}] {message}')
 
     def log_message(self, format, *args):
+            print(f'[{CYAN}*{RESET}] {message}')
         if not self.log_printed:
             self.print_message(
                 f'Received {self.command} request from {self.client_address[0]}:{self.client_address[1]}')
@@ -347,23 +351,33 @@ class PayloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 def make_handler_instance(filename: str, dirname: str, quiet: bool):
     class CustomHandler(PayloadHTTPRequestHandler):
+        
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, quiet=quiet, filename=filename, directory=dirname, **kwargs)
-
-
+            super().__init__(
+                *args, quiet=quiet, filename=filename, directory=dirname, **kwargs
+            )
+    
     return CustomHandler
 
 
-def start_http_put_server(__obj, __filename, args: argparse.Namespace):
-    echo_val = args.echo
-    obf_val = args.obfuscate
-    msg_prefix = f'[{Fore.CYAN}*{Fore.RESET}]' if not args.quiet else '#'
+def start_http_put_server(__obj, __filename, ns: argparse.Namespace):
+    echo_val = ns.echo
+    obf_val = ns.obfuscate
+    msg_prefix = f'[{CYAN}*{RESET}]' if not ns.quiet else '#'
     handler = lambda *args: PutHTTPRequestHandler(
-        *args, echo=echo_val, obfuscate=obf_val, steg_obj=__obj, filename=__filename)
-    httpd = socketserver.TCPServer((args.remote_stego_image[1], int(args.remote_stego_image[2])), handler)
+        *args, echo=echo_val, obfuscate=obf_val, steg_obj=__obj, filename=__filename
+    )
+    httpd = socketserver.TCPServer(
+        (ns.remote_stego_image[1], int(ns.remote_stego_image[2])), handler
+    )
     httpd.timeout = 1
     httpd.stop = False
-    print(f'{msg_prefix} PUT server listening on http://{args.remote_stego_image[1]}:{args.remote_stego_image[2]}/')
+    print(
+        '{0} PUT server listening on http://{1}:{2}/'.format(
+            msg_prefix,
+            *ns.remote_stego_image
+        )
+    )
     try:
         while not httpd.stop:
             httpd.handle_request()
@@ -378,8 +392,10 @@ def handle_http_server(__handler, lhost, lport, args: argparse.Namespace):
     httpd = socketserver.TCPServer((lhost, lport), __handler)
     httpd.timeout = 1
     httpd.stop = False
-    msg_prefix = f'[{Fore.CYAN}*{Fore.RESET}]' if not args.quiet else '#'
-    print(f'{msg_prefix} GET server listening on http://{lhost}:{lport}/{args.remote_output_file[0]}')
+    msg_prefix = f'[{CYAN}*{RESET}]' if not args.quiet else '#'
+    print(
+        f'{msg_prefix} GET server listening on http://{lhost}:{lport}/{args.remote_output_file[0]}'
+    )
     try:
         while not httpd.stop:
             httpd.handle_request()
@@ -441,14 +457,14 @@ def handle_payload(__payload: bytes, args: argparse.Namespace):
         save_payload(__payload, output_file_path)
         if not args.quiet:
             print(f"Extracted ZIP archive saved as '{output_file_path}'")
-
+    
     def handle_txt():
         extracted_text = __payload.decode('utf-8', errors='replace')
         prefix = 'Obfuscated payload' if args.obfuscate else 'Payload'
         if not (args.quiet or args.echo) and not args.output_file:
             print('\nExtracted payload:\n')
         if args.echo:
-            print(f'[{Fore.CYAN}*{Fore.RESET}] {prefix} echoed back to remote host')
+            print(f'[{CYAN}*{RESET}] {prefix} echoed back to remote host')
         elif args.ps_execute:
             exec_ps(extracted_text, exec_type=args.ps_execute)
         else:
@@ -555,8 +571,11 @@ def extract(args: argparse.Namespace):
 
 
 def main_cli():
+    from .banner import BANNER
+    
     parser = argparse.ArgumentParser(
-        prog='python -m chaosedgesteg', description='ChaosEdgeSteg: A chaos-based edge adaptive steganography tool')
+        description='chaos-based edge adaptive steganography tool'
+    )
     subparsers = parser.add_subparsers()
 
     # Embed action arguments
@@ -617,16 +636,19 @@ def main_cli():
         help='Executes the extracted payload in a temp PowerShell instance. Valid params: ('
              '\'python\', \'pwsh\')')
     extract_parser.set_defaults(func=extract)
-
-    from sys import argv as sys_argv, exit as sys_exit
-    if len(sys_argv) == 1:
-        print(header())
+    
+    if len(sys.argv) == 1:
+        print(BANNER)
         parser.print_help()
-        sys_exit(1)
-
+        sys.exit(1)
+    
     args = parser.parse_args()
-
+    
     if not args.quiet:
-        print(header())
-
+        print(BANNER)
+    
     args.func(args)
+
+
+if __name__ == '__main__':
+    sys.exit(main_cli())
