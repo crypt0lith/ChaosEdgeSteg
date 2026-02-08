@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chaosedgesteg"
 dynamic = ["version"]
+requires-python = ">=3.12"
 description = "chaos-based edge adaptive steganography tool"
 readme = "README.md"
 keywords = ["steganography", "cli"]
@@ -24,7 +25,7 @@ dependencies = [
 ]
 
 [project.urls]
-repository = "https://github.com/crypt0lith/chaosedgesteg.git"
+repository = "https://github.com/crypt0lith/ChaosEdgeSteg.git"
 
 [tool.setuptools_scm]
 write_to = "chaosedgesteg/_version.py"
