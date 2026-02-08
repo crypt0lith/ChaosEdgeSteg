@@ -18,14 +18,18 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "opencv-python",
-    "numpy",
     "mpmath",
-    "tqdm",
+    "numpy",
+    "opencv-python",
+    "pillow",
+    "requests",
 ]
 
 [project.urls]
 repository = "https://github.com/crypt0lith/ChaosEdgeSteg.git"
+
+[project.scripts]
+chaosedgesteg = "chaosedgesteg.__main__:main"
 
 [tool.setuptools_scm]
 write_to = "chaosedgesteg/_version.py"
