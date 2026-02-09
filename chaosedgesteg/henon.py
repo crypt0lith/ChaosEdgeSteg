@@ -1,4 +1,4 @@
-__all__ = ['shannon_entropy', 'henon_indices', 'henon_params']
+__all__ = ["shannon_entropy", "henon_indices", "henon_params"]
 
 import hashlib
 import logging
@@ -11,7 +11,7 @@ import numpy as np
 from . import logger as _base_logger
 from ._typing import Array3d, Array3dIndex, ArrayIndices, SupportsEntropy
 
-logger = _base_logger.getChild('henon')
+logger = _base_logger.getChild("henon")
 
 mp.mp.dps = 200
 K = 48
@@ -38,7 +38,7 @@ def shannon_entropy(seq: SupportsEntropy, /) -> mp.mpf:
     counts = Counter(seq)
     n = mp.mpf(len(seq))
     ln2 = mp.log(2)
-    h = mp.mpf('0')
+    h = mp.mpf("0")
     for c in counts.values():
         p = mp.mpf(c) / n
         h -= p * (mp.log(p) / ln2)
@@ -51,8 +51,8 @@ def _mp_to_fixed(x: mp.mpf, /) -> int:
     return int(mp.nint(x * S))
 
 
-X0 = _mp_to_fixed(mp.mpf('0.123456789123'))
-Y0 = _mp_to_fixed(mp.mpf('0.362436069531'))
+X0 = _mp_to_fixed(mp.mpf("0.123456789123"))
+Y0 = _mp_to_fixed(mp.mpf("0.362436069531"))
 
 
 def henon_params(key: SupportsEntropy) -> tuple[int, int]:
