@@ -1,2 +1,26 @@
+# editor temp/backup files
+*.bak
+*.diff
 .idea/
-/_test/
+*.tmp
+.vscode
+
+# compiled source
+*.dll
+*.exe
+*.o
+*.o.d
+*.py[ocd]
+*.so
+*.mod
+
+# python files
+build
+build-*
+dist
+_version.py
+doc/build
+*.egg-info
+venv/
+
+# this project
