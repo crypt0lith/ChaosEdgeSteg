@@ -2,10 +2,15 @@ __all__ = ['shannon_entropy', 'henon_indices', 'henon_params']
 
 from collections import Counter
 
+import logging
+
 import mpmath as mp
 import numpy as np
 
+from . import logger as _base_logger
 from ._typing import Array3d, Array3dIndex, ArrayIndices, SupportsEntropy
+
+logger = _base_logger.getChild('henon')
 
 mp.mp.dps = 200
 K = 48
@@ -28,6 +33,8 @@ def shannon_entropy(seq: SupportsEntropy, /) -> mp.mpf:
     for c in counts.values():
         p = mp.mpf(c) / n
         h -= p * (mp.log(p) / ln2)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("shannon_entropy n=%d h=%s", int(n), h)
     return h
 
 
@@ -43,7 +50,11 @@ def henon_params(key: SupportsEntropy) -> tuple[int, int]:
     ent = shannon_entropy(key)
     a = (mp.mpf('56') - ent) / mp.mpf('40')
     b = (mp.mpf('24') + ent) / mp.mpf('80')
-    return _mp_to_fixed(a), _mp_to_fixed(b)
+    a_fixed = _mp_to_fixed(a)
+    b_fixed = _mp_to_fixed(b)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("henon_params a=%d b=%d", a_fixed, b_fixed)
+    return a_fixed, b_fixed
 
 
 def henon_indices(arr: Array3d, key: SupportsEntropy, count: int):
@@ -68,6 +79,13 @@ def henon_indices(arr: Array3d, key: SupportsEntropy, count: int):
             visited[idx] = True
             yield idx
             n -= 1
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "henon_indices requested=%d generated=%d steps=%d",
+                count,
+                count - n,
+                steps,
+            )
 
     indices: ArrayIndices = np.fromiter(generate(), dtype=np.int64, count=count)
     d0, d1, d2 = _i_to_yxz(indices, *arr.shape[:2])
