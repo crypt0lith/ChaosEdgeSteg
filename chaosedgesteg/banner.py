@@ -1,4 +1,4 @@
-BANNER = '''\
+BANNER = """\
 \x1b[0;31m
 \x1b[23C.    .\x1b[13C.\x1b[13C...
 \x1b[13C,.....    ;     .\x1b[11C...\x1b[10C..;;;..   .....
@@ -45,8 +45,8 @@ BANNER = '''\
 \x1b[18C`##############################################`
 \x1b[18C````````````````````````````````````\x1b[10C``\x1b[12D\x1b[30mcrypt0lith
 \x1b[0m
-'''
-if __name__ == '__main__':
+"""
+if __name__ == "__main__":
     import sys
 
     print(BANNER, file=sys.stderr)

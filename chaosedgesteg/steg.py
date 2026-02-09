@@ -1,4 +1,4 @@
-__all__ = ['adaptive_canny', 'embed', 'extract']
+__all__ = ["adaptive_canny", "embed", "extract"]
 
 import logging
 from typing import Optional
@@ -10,7 +10,7 @@ from . import SteganographyError, logger as _base_logger
 from ._typing import Array3d, ArrayBase, GrayscaleArray, SupportsEntropy
 from .henon import henon_indices
 
-logger = _base_logger.getChild('steg')
+logger = _base_logger.getChild("steg")
 
 
 def adaptive_canny(
@@ -75,7 +75,9 @@ def adaptive_canny(
     return best_edges
 
 
-DEFAULT_KEY = 'SECRET_PASSWORD'
+DEFAULT_KEY = "SECRET_PASSWORD"
+MAGIC = b"CES"
+HEADER_BITS_SIZE = (len(MAGIC) + 4) * 8
 
 
 def embed(
@@ -85,9 +87,9 @@ def embed(
 ):
     if key is None:
         key = DEFAULT_KEY
-    header = np.frombuffer(len(payload).to_bytes(4, 'little'), dtype=np.uint8)
+    header = np.frombuffer(MAGIC + len(payload).to_bytes(4, "little"), dtype=np.uint8)
     header_bits = np.unpackbits(header)
-    assert header_bits.size == 32
+    assert header_bits.size == HEADER_BITS_SIZE
     payload_bits = np.unpackbits(payload)
     logger.info("embed payload_bytes=%d", int(payload.size))
     if logger.isEnabledFor(logging.DEBUG):
@@ -110,8 +112,8 @@ def embed(
         try:
             d0, _, d2 = henon_indices(domain, key, count)
         except ValueError as e:
-            if 'iterator too short' in str(e):
-                raise SteganographyError('payload too large for image') from e
+            if "iterator too short" in str(e):
+                raise SteganographyError("payload too large for image") from e
             raise
         idx = ys[d0], xs[d0], d2
         img[idx] = (img[idx] & 0xFE) | bits
@@ -145,10 +147,14 @@ def extract(
         d0, _, d2 = henon_indices(domain, key, count)
         return ys[d0], xs[d0], d2
 
-    header_idx = get_idx(32)
-    header_bytes = np.packbits(carrier_img[header_idx] & 1)
+    header_idx = get_idx(HEADER_BITS_SIZE)
+    header_bytes = np.packbits(carrier_img[header_idx] & 1).tobytes()
+    if header_bytes.startswith(MAGIC):
+        header_bytes = header_bytes.removeprefix(MAGIC)
+    else:
+        raise ValueError("bad password")
     ignored[header_idx[:2]] = True
-    payload_len = int.from_bytes(header_bytes, 'little')
+    payload_len = int.from_bytes(header_bytes, "little")
     logger.info("extract payload_bytes=%d", payload_len)
     idx = get_idx(payload_len * 8)
     return np.packbits(carrier_img[idx] & 1)

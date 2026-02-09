@@ -1,8 +1,9 @@
-__all__ = ['shannon_entropy', 'henon_indices', 'henon_params']
+__all__ = ["shannon_entropy", "henon_indices", "henon_params"]
 
-from collections import Counter
-
+import hashlib
 import logging
+from collections import Counter
+from collections.abc import Buffer
 
 import mpmath as mp
 import numpy as np
@@ -10,7 +11,7 @@ import numpy as np
 from . import logger as _base_logger
 from ._typing import Array3d, Array3dIndex, ArrayIndices, SupportsEntropy
 
-logger = _base_logger.getChild('henon')
+logger = _base_logger.getChild("henon")
 
 mp.mp.dps = 200
 K = 48
@@ -25,11 +26,19 @@ def _splitmix64(x: int, /) -> int:
     return (x ^ (x >> 31)) & MASK64
 
 
+def _keyhash64(key: SupportsEntropy) -> int:
+    if isinstance(key, Buffer):
+        data = bytes(key)
+    else:
+        data = str(key).encode("utf-8", "surrogatepass")
+    return int.from_bytes(hashlib.blake2b(data, digest_size=8).digest(), "little")
+
+
 def shannon_entropy(seq: SupportsEntropy, /) -> mp.mpf:
     counts = Counter(seq)
     n = mp.mpf(len(seq))
     ln2 = mp.log(2)
-    h = mp.mpf('0')
+    h = mp.mpf("0")
     for c in counts.values():
         p = mp.mpf(c) / n
         h -= p * (mp.log(p) / ln2)
@@ -42,19 +51,20 @@ def _mp_to_fixed(x: mp.mpf, /) -> int:
     return int(mp.nint(x * S))
 
 
-X0 = _mp_to_fixed(mp.mpf('0.123456789123'))
-Y0 = _mp_to_fixed(mp.mpf('0.362436069531'))
+X0 = _mp_to_fixed(mp.mpf("0.123456789123"))
+Y0 = _mp_to_fixed(mp.mpf("0.362436069531"))
 
 
 def henon_params(key: SupportsEntropy) -> tuple[int, int]:
     ent = shannon_entropy(key)
-    a = (mp.mpf('56') - ent) / mp.mpf('40')
-    b = (mp.mpf('24') + ent) / mp.mpf('80')
-    a_fixed = _mp_to_fixed(a)
-    b_fixed = _mp_to_fixed(b)
+    a = _mp_to_fixed((mp.mpf("56") - ent) / mp.mpf("40"))
+    b = _mp_to_fixed((mp.mpf("24") + ent) / mp.mpf("80"))
+    h = _keyhash64(key)
+    a += ((h & 0xFFFFFFFF) - 0x80000000) >> 16
+    b += (((h >> 32) & 0xFFFFFFFF) - 0x80000000) >> 16
     if logger.isEnabledFor(logging.DEBUG):
-        logger.debug("henon_params a=%d b=%d", a_fixed, b_fixed)
-    return a_fixed, b_fixed
+        logger.debug("henon_params a=%d b=%d", a, b)
+    return a, b
 
 
 def henon_indices(arr: Array3d, key: SupportsEntropy, count: int):
@@ -65,7 +75,7 @@ def henon_indices(arr: Array3d, key: SupportsEntropy, count: int):
         a, b = henon_params(key)
         x, y = X0, Y0
         n = count
-        max_steps = count * 50
+        max_steps = count * 10
         steps = 0
         visited = np.zeros(arr.size, dtype=bool)
         while n > 0 and steps < max_steps:

@@ -22,11 +22,11 @@ def _expanduser(*args: str):
 
 
 def collect_zipfile_arr[_T: (Path, BinaryIO)](*paths: _T):
-    with NamedTemporaryFile('w+b') as tmp:
-        with ZipFile(tmp, 'w') as zf:
+    with NamedTemporaryFile("w+b") as tmp:
+        with ZipFile(tmp, "w") as zf:
             if len(paths) == 1 and not isinstance((fd := paths[0]), Path):
-                zf.comment = b'0'
-                with zf.open('0.bin', 'w') as f:
+                zf.comment = b"0"
+                with zf.open("0.bin", "w") as f:
                     while chunk := fd.read(4096):
                         f.write(chunk)
             else:
@@ -35,7 +35,7 @@ def collect_zipfile_arr[_T: (Path, BinaryIO)](*paths: _T):
                     if path.is_file():
                         zf.write(path, arcname=path.name)
                     elif path.is_dir():
-                        for child in path.rglob('*'):
+                        for child in path.rglob("*"):
                             if child.is_dir():
                                 continue
                             zf.write(child, arcname=child.relative_to(path.parent))
@@ -43,7 +43,7 @@ def collect_zipfile_arr[_T: (Path, BinaryIO)](*paths: _T):
                         from errno import ENOENT
 
                         raise FileNotFoundError(
-                            ENOENT, 'no such file or directory', os.fspath(path)
+                            ENOENT, "no such file or directory", os.fspath(path)
                         )
         tmp.seek(0)
         arr = np.fromfile(tmp, dtype=np.uint8)
@@ -52,15 +52,15 @@ def collect_zipfile_arr[_T: (Path, BinaryIO)](*paths: _T):
 
 
 def dump_zipfile_arr(arr: np.ndarray[tuple[int], np.dtype[np.uint8]]):
-    with NamedTemporaryFile('w+b') as tmp:
+    with NamedTemporaryFile("w+b") as tmp:
         arr.tofile(tmp)
         tmp.seek(0)
         content = bytearray()
         is_zipfile = False
-        with ZipFile(tmp, 'r') as zf:
-            if zf.comment == b'0':
-                assert zf.namelist() == ['0.bin']
-                content.extend(zf.read('0.bin'))
+        with ZipFile(tmp, "r") as zf:
+            if zf.comment == b"0":
+                assert zf.namelist() == ["0.bin"]
+                content.extend(zf.read("0.bin"))
             else:
                 is_zipfile = True
         if is_zipfile:
@@ -76,13 +76,13 @@ def image_from_uri(uri: str):
     scheme = parsed.scheme
     fname = Path(parsed.path).name
     logger.info("loading image from uri scheme=%s", scheme or "<none>")
-    with NamedTemporaryFile('w+b') as tmp:
-        if scheme == 'file':
+    with NamedTemporaryFile("w+b") as tmp:
+        if scheme == "file":
             path = Path.from_uri(uri)
-            with path.open('rb') as f:
+            with path.open("rb") as f:
                 while chunk := f.read(8192):
                     tmp.write(chunk)
-        elif scheme.startswith('http') or not scheme:
+        elif scheme.startswith("http") or not scheme:
             import requests
 
             with requests.get(uri, stream=True, timeout=10) as r:
@@ -112,15 +112,15 @@ def open_image[AnyStr: (str, bytes)](path: AnyStr | os.PathLike[str] | BinaryIO)
 
 
 def assert_lossless(im: Image.Image):
-    fmt = (im.format or '').upper()
+    fmt = (im.format or "").upper()
     logger.debug("assert_lossless format=%s", fmt or "<none>")
-    if fmt in {'JPEG', 'JPG', 'MPO'}:
+    if fmt in {"JPEG", "JPG", "MPO"}:
         raise LossyImageError(f"{fmt} uses lossy compression")
-    elif fmt in {'PNG', 'BMP', 'GIF'}:
+    elif fmt in {"PNG", "BMP", "GIF"}:
         pass
-    elif fmt == 'WEBP' and im.info.get('lossless') is not True:
+    elif fmt == "WEBP" and im.info.get("lossless") is not True:
         raise LossyImageError(f"{fmt} does not use lossless compression")
-    elif fmt == 'TIFF' and getattr(im, 'tag_v2', {}).get(259) not in {1, 5, 8, 32773}:
+    elif fmt == "TIFF" and getattr(im, "tag_v2", {}).get(259) not in {1, 5, 8, 32773}:
         raise LossyImageError(f"{fmt} uses lossy or unknown compression")
     else:
         raise ValueError(f"unsupported format: {fmt!r}")
@@ -134,25 +134,25 @@ def handle_cover_image(ns: argparse.Namespace):
     else:
         logger.info("using local cover image %s", path)
         im, fname = open_image(path)
-    with im.convert('RGB') as rgb:
+    with im.convert("RGB") as rgb:
         arr = np.array(rgb, dtype=np.uint8)
         arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
     logger.debug("cover image shape=%s dtype=%s", arr.shape, arr.dtype)
     return arr, fname
 
 
-def get_ces_filename(suffix: str = ''):
+def get_ces_filename(suffix: str = ""):
     fname = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
     fname += f"_{prog}{suffix}"
     return fname
 
 
 def handle_password(ns: argparse.Namespace):
-    if hasattr(ns, 'password'):
+    if hasattr(ns, "password"):
         password: str = ns.password
         logger.debug("using password from argument")
         return password
-    elif hasattr(ns, 'password_file'):
+    elif hasattr(ns, "password_file"):
         buf = bytearray()
         password_file: BinaryIO = ns.password_file
         while chunk := password_file.read(4096):
@@ -166,7 +166,7 @@ def handle_password(ns: argparse.Namespace):
 def handle_embed(ns: argparse.Namespace):
     arr, fname = handle_cover_image(ns)
     suffix = Path(fname).suffix
-    if hasattr(ns, 'outfile'):
+    if hasattr(ns, "outfile"):
         outfile: Path = ns.outfile
         if outfile.is_dir():
             outfile /= Path(get_ces_filename(suffix))
@@ -185,13 +185,13 @@ def handle_embed(ns: argparse.Namespace):
 def handle_extract(ns: argparse.Namespace) -> Optional[Path]:
     arr, _ = handle_cover_image(ns)
     steg_im, _ = open_image(ns.steg_img_path)
-    with steg_im.convert('RGB') as rgb:
+    with steg_im.convert("RGB") as rgb:
         steg_arr = np.array(rgb, dtype=np.uint8)
         steg_arr = cv2.cvtColor(steg_arr, cv2.COLOR_RGB2BGR)
     payload = extract(arr, steg_arr, key=handle_password(ns))
     is_zipfile, payload_buf = dump_zipfile_arr(payload)
-    ext = '.zip' if is_zipfile else '.bin'
-    if hasattr(ns, 'outfile'):
+    ext = ".zip" if is_zipfile else ".bin"
+    if hasattr(ns, "outfile"):
         outfile: Path | BinaryIO = ns.outfile
         if isinstance(outfile, Path):
             if outfile.is_dir():
@@ -225,7 +225,7 @@ def handle_base(ns: argparse.Namespace):
     handler = None
     debug_output: Optional[Path] = ns.debug_output
     if debug_output is not None:
-        handler = logging.FileHandler(debug_output, mode='a', encoding='utf-8')
+        handler = logging.FileHandler(debug_output, mode="a", encoding="utf-8")
     elif not ns.quiet:
         handler = logging.StreamHandler(sys.stderr)
     if handler is not None:
@@ -250,159 +250,159 @@ def handle_base(ns: argparse.Namespace):
 def main():
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument(
-        '-v',
-        '--verbose',
-        dest='verbosity',
-        action='count',
+        "-v",
+        "--verbose",
+        dest="verbosity",
+        action="count",
         default=0,
-        help='increase verbosity level',
+        help="increase verbosity level",
     )
     base_parser.add_argument(
-        '-o',
-        '--debug-output',
-        dest='debug_output',
+        "-o",
+        "--debug-output",
+        dest="debug_output",
         type=_expanduser,
-        metavar='FILE',
-        help='write logs to FILE',
+        metavar="FILE",
+        help="write logs to FILE",
     )
     base_parser.add_argument(
-        '-q',
-        '--quiet',
-        dest='quiet',
-        action='store_true',
-        help='suppress stderr output',
+        "-q",
+        "--quiet",
+        dest="quiet",
+        action="store_true",
+        help="suppress stderr output",
     )
     base_parser.add_argument(
-        '--no-banner',
-        dest='no_banner',
-        action='store_true',
-        help='suppress banner output',
+        "--no-banner",
+        dest="no_banner",
+        action="store_true",
+        help="suppress banner output",
     )
 
-    cover_image_opts = base_parser.add_argument_group(title='cover image options')
+    cover_image_opts = base_parser.add_argument_group(title="cover image options")
     cover_image_opts.add_argument(
-        dest='cover_img_path',
-        metavar='IMG',
-        help='. '.join(
+        dest="cover_img_path",
+        metavar="IMG",
+        help=". ".join(
             [
-                'path to cover image used for embed/extract',
-                'image must use a lossless format (eg., PNG, BMP)',
+                "path to cover image used for embed/extract",
+                "image must use a lossless format (eg., PNG, BMP)",
             ]
         ),
     )
     cover_image_opts.add_argument(
-        '-r',
-        '--remote',
-        dest='from_remote',
-        action='store_true',
-        help='interpret IMG as a URI to a remote image (default: %(default)s)',
+        "-r",
+        "--remote",
+        dest="from_remote",
+        action="store_true",
+        help="interpret IMG as a URI to a remote image (default: %(default)s)",
     )
 
     password_opts = base_parser.add_argument_group(
-        title='password options',
-        description='specify key to use for Hénon map parameter entropy',
+        title="password options",
+        description="specify key to use for Hénon map parameter entropy",
     )
     password_group = password_opts.add_mutually_exclusive_group()
     password_group.add_argument(
-        '-p',
-        '--password',
-        dest='password',
-        metavar='PASSWORD',
-        help='. '.join(
+        "-p",
+        "--password",
+        dest="password",
+        metavar="PASSWORD",
+        help=". ".join(
             [
-                'plaintext string',
-                'this option is insecure and should be avoided, '
-                'as it will be visible in process listings and stuff like that',
-                'use --passwd-file instead',
+                "plaintext string",
+                "this option is insecure and should be avoided, "
+                "as it will be visible in process listings and stuff like that",
+                "use --passwd-file instead",
             ]
         ),
         default=argparse.SUPPRESS,
     )
     password_group.add_argument(
-        '-P',
-        '--passwd-file',
-        dest='password_file',
-        metavar='FILE',
-        type=argparse.FileType('rb'),
-        help='read password from FILE',
+        "-P",
+        "--passwd-file",
+        dest="password_file",
+        metavar="FILE",
+        type=argparse.FileType("rb"),
+        help="read password from FILE",
         default=argparse.SUPPRESS,
     )
 
     parser = argparse.ArgumentParser(prog=prog, allow_abbrev=False)
     parser.add_argument(
-        '-V', '--version', action='version', version=f'%(prog)s {__version__}'
+        "-V", "--version", action="version", version=f"%(prog)s {__version__}"
     )
 
-    cmd_subparsers = parser.add_subparsers(dest='cmd', required=True)
+    cmd_subparsers = parser.add_subparsers(dest="cmd", required=True)
 
-    embed_subparser = cmd_subparsers.add_parser('embed', parents=[base_parser])
+    embed_subparser = cmd_subparsers.add_parser("embed", parents=[base_parser])
     embed_subparser.add_argument(
-        dest='paths',
+        dest="paths",
         type=_expanduser,
-        nargs='*',
-        metavar='FILE',
+        nargs="*",
+        metavar="FILE",
         default=[sys.stdin.buffer],
     )
     embed_subparser.add_argument(
-        '-O',
-        '--outfile',
-        dest='outfile',
+        "-O",
+        "--outfile",
+        dest="outfile",
         type=_expanduser,
-        metavar='FILE',
+        metavar="FILE",
         default=argparse.SUPPRESS,
     )
 
-    extract_subparser = cmd_subparsers.add_parser('extract', parents=[base_parser])
+    extract_subparser = cmd_subparsers.add_parser("extract", parents=[base_parser])
     extract_subparser.add_argument(
-        dest='steg_img_path', metavar='STEG_IMG', type=_expanduser
+        dest="steg_img_path", metavar="STEG_IMG", type=_expanduser
     )
     extract_outfile_opts = extract_subparser.add_argument_group(
-        title='output options',
-        description='. '.join(
+        title="output options",
+        description=". ".join(
             [
-                'specify where to write extracted payload',
-                'by default, '
-                'writes to %r, where <ext> is either %r or %r depending on the payload'
-                % (f"%Y%m%d%H%M%S_{prog}.<ext>", 'bin', 'zip'),
+                "specify where to write extracted payload",
+                "by default, "
+                "writes to %r, where <ext> is either %r or %r depending on the payload"
+                % (f"%Y%m%d%H%M%S_{prog}.<ext>", "bin", "zip"),
             ]
         ),
     )
     extract_outfile_group = extract_outfile_opts.add_mutually_exclusive_group()
     extract_outfile_group.add_argument(
-        '--stdout',
-        dest='outfile',
+        "--stdout",
+        dest="outfile",
         const=sys.stdout.buffer,
-        help='. '.join(
+        help=". ".join(
             [
-                'write directly to stdout',
-                'warning: if payload is binary and stdout is a tty, '
-                'this will mess up your terminal',
+                "write directly to stdout",
+                "warning: if payload is binary and stdout is a tty, "
+                "this will mess up your terminal",
             ]
         ),
-        action='store_const',
+        action="store_const",
         default=argparse.SUPPRESS,
     )
     extract_outfile_group.add_argument(
-        '-O',
-        '--outfile',
-        dest='outfile',
+        "-O",
+        "--outfile",
+        dest="outfile",
         type=_expanduser,
-        metavar='FILE',
-        help='write extracted payload to FILE',
+        metavar="FILE",
+        help="write extracted payload to FILE",
         default=argparse.SUPPRESS,
     )
 
     ns = parser.parse_args()
     log_to_stderr = handle_base(ns)
     try:
-        if ns.cmd == 'embed':
+        if ns.cmd == "embed":
             outfile = handle_embed(ns)
             if not ns.quiet:
                 print(
                     f"[\x1b[32m*\x1b[0m] stego image saved to {outfile}",
                     file=sys.stderr,
                 )
-        elif ns.cmd == 'extract':
+        elif ns.cmd == "extract":
             outfile = handle_extract(ns)
             if not (outfile is None or ns.quiet):
                 print(f"[\x1b[32m*\x1b[0m] payload saved to {outfile}", file=sys.stderr)
@@ -412,5 +412,5 @@ def main():
         raise
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())
