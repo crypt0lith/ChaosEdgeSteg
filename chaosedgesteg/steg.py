@@ -76,6 +76,8 @@ def adaptive_canny(
 
 
 DEFAULT_KEY = 'SECRET_PASSWORD'
+MAGIC = b"CES"
+HEADER_BITS_SIZE = (len(MAGIC) + 4) * 8
 
 
 def embed(
@@ -85,9 +87,9 @@ def embed(
 ):
     if key is None:
         key = DEFAULT_KEY
-    header = np.frombuffer(len(payload).to_bytes(4, 'little'), dtype=np.uint8)
+    header = np.frombuffer(MAGIC + len(payload).to_bytes(4, "little"), dtype=np.uint8)
     header_bits = np.unpackbits(header)
-    assert header_bits.size == 32
+    assert header_bits.size == HEADER_BITS_SIZE
     payload_bits = np.unpackbits(payload)
     logger.info("embed payload_bytes=%d", int(payload.size))
     if logger.isEnabledFor(logging.DEBUG):
@@ -145,8 +147,12 @@ def extract(
         d0, _, d2 = henon_indices(domain, key, count)
         return ys[d0], xs[d0], d2
 
-    header_idx = get_idx(32)
-    header_bytes = np.packbits(carrier_img[header_idx] & 1)
+    header_idx = get_idx(HEADER_BITS_SIZE)
+    header_bytes = np.packbits(carrier_img[header_idx] & 1).tobytes()
+    if header_bytes.startswith(MAGIC):
+        header_bytes = header_bytes.removeprefix(MAGIC)
+    else:
+        raise ValueError("bad password")
     ignored[header_idx[:2]] = True
     payload_len = int.from_bytes(header_bytes, 'little')
     logger.info("extract payload_bytes=%d", payload_len)
