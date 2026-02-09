@@ -40,6 +40,4 @@ include = ["chaosedgesteg*"]
 
 [tool.black]
 preview = true
-skip-magic-trailing-comma = true
-skip-string-normalization = true
 target-version = ["py313"]
