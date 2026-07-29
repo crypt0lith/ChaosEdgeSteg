@@ -13,8 +13,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from . import LossyImageError, __name__ as prog, __version__, logger
-from .steg import embed, extract
+from . import LossyImageError, __name__ as prog, __version__, embed, extract, logger
 
 
 def _expanduser(*args: str):
