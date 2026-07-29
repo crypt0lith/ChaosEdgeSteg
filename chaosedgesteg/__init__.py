@@ -1,3 +1,13 @@
+__all__ = [
+    "LossyImageError",
+    "SteganographyError",
+    "adaptive_canny",
+    "embed",
+    "extract",
+    "henon_indices",
+    "henon_params",
+    "shannon_entropy",
+]
 import hashlib
 import logging
 import typing as tp
