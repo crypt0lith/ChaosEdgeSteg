@@ -8,11 +8,13 @@ __all__ = [
     "henon_params",
     "shannon_entropy",
 ]
+import collections.abc as abc
 import hashlib
 import logging
+import sys
 import typing as tp
 from collections import Counter
-from collections.abc import Buffer
+from functools import lru_cache
 
 import cv2
 import mpmath as mp
@@ -30,7 +32,7 @@ type ArrayIndices[_Dim: int] = ArrayBase[tuple[_Dim], np.int64]
 type Array3dIndex[_Dim: int] = TupleOf3[ArrayIndices[_Dim]]
 type Array3d[_SCT: np.generic] = ArrayBase[tuple[int, int, tp.Literal[3]], _SCT]
 type TupleOf3[_T] = tuple[_T, _T, _T]
-type SupportsEntropy = tp.Sequence[tp.Hashable]
+type SupportsEntropy = abc.Sequence[tp.Hashable]
 type GrayscaleArray = ArrayBase[tuple[int, int], np.uint8]
 
 
@@ -43,6 +45,34 @@ class SteganographyError(ValueError):
 
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=0x10)
+def _logger_is_enabled(f, /):
+    level = dict.get(
+        {
+            logger.critical: logging.CRITICAL,
+            logger.error: logging.ERROR,
+            logger.warning: logging.WARNING,
+            logger.info: logging.INFO,
+            logger.debug: logging.DEBUG,
+        },
+        f,
+    )
+    return level and logger.isEnabledFor(level)
+
+
+def _attest_log[**P, R](
+    f: abc.Callable[tp.Concatenate[str, P], R],
+    /,
+    msg: str,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> R | None:
+    if not _logger_is_enabled(f):
+        return
+    qualname = sys._getframe(1).f_code.co_qualname.replace(".<locals>.", ".")
+    return f(f"{qualname}\t{msg}", *args, **kwargs)
 
 
 mp.mp.dps = 200
@@ -59,7 +89,7 @@ def _splitmix64(x: int, /) -> int:
 
 
 def _keyhash64(key: SupportsEntropy) -> int:
-    if isinstance(key, Buffer):
+    if isinstance(key, abc.Buffer):
         data = bytes(key)
     else:
         data = str(key).encode("utf-8", "surrogatepass")
@@ -74,8 +104,7 @@ def shannon_entropy(seq: SupportsEntropy, /) -> mp.mpf:
     for c in counts.values():
         p = mp.mpf(c) / n
         h -= p * (mp.log(p) / ln2)
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug("shannon_entropy n=%d h=%s", int(n), h)
+    _attest_log(logger.debug, "n=%d h=%s", int(n), h)
     return h
 
 
@@ -94,8 +123,7 @@ def henon_params(key: SupportsEntropy) -> tuple[int, int]:
     h = _keyhash64(key)
     a += ((h & 0xFFFFFFFF) - 0x80000000) >> 16
     b += (((h >> 32) & 0xFFFFFFFF) - 0x80000000) >> 16
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug("henon_params a=%d b=%d", a, b)
+    _attest_log(logger.debug, "a=%d b=%d", a, b)
     return a, b
 
 
@@ -121,13 +149,9 @@ def henon_indices(arr: Array3d, key: SupportsEntropy, count: int):
             visited[idx] = True
             yield idx
             n -= 1
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(
-                "henon_indices requested=%d generated=%d steps=%d",
-                count,
-                count - n,
-                steps,
-            )
+        _attest_log(
+            logger.debug, "requested=%d generated=%d steps=%d", count, count - n, steps
+        )
 
     indices: ArrayIndices = np.fromiter(generate(), dtype=np.int64, count=count)
     d0, d1, d2 = _i_to_yxz(indices, *arr.shape[:2])
@@ -161,13 +185,13 @@ def adaptive_canny(
     hmin, hmax = (max(int(x), 0) & 0xFF for x in hi)
     target_density = count / arr.size
     target_edge_density = min(max(1.0 - target_density, 0.0), 1.0)
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "adaptive_canny target_edge_density=%.6f count=%d size=%d",
-            target_edge_density,
-            count,
-            arr.size,
-        )
+    _attest_log(
+        logger.debug,
+        "target_edge_density=%.6f count=%d size=%d",
+        target_edge_density,
+        count,
+        arr.size,
+    )
     filtered = cv2.bilateralFilter(arr, d=9, sigmaColor=75, sigmaSpace=75)
     lo_t = 0.0
     hi_t = 1.0
@@ -196,14 +220,14 @@ def adaptive_canny(
             lo_t = t
         else:
             hi_t = t
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "adaptive_canny result lower=%d upper=%d err=%.6f reason=%r",
-            prev_lower,
-            prev_upper,
-            best_err if best_err is not None else -1.0,
-            reason or "max iter reached",
-        )
+    _attest_log(
+        logger.debug,
+        "result lower=%d upper=%d err=%.6f reason=%r",
+        prev_lower,
+        prev_upper,
+        best_err if best_err is not None else -1.0,
+        reason or "max iter reached",
+    )
     return best_edges
 
 
@@ -223,14 +247,14 @@ def embed(
     header_bits = np.unpackbits(header)
     assert header_bits.size == HEADER_BITS_SIZE
     payload_bits = np.unpackbits(payload)
-    logger.info("embed payload_bytes=%d", int(payload.size))
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "embed header_bits=%d payload_bits=%d image_shape=%s",
-            header_bits.size,
-            payload_bits.size,
-            img.shape,
-        )
+    _attest_log(logger.info, "payload_bytes=%d", int(payload.size))
+    _attest_log(
+        logger.debug,
+        "header_bits=%d payload_bits=%d image_shape=%s",
+        header_bits.size,
+        payload_bits.size,
+        img.shape,
+    )
     img = img.copy()
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     occupied = np.zeros(gray.shape, dtype=bool)
@@ -238,7 +262,7 @@ def embed(
         count = bits.size
         edges = adaptive_canny(gray, count) & ~occupied
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("embed edges_nonzero=%d", int(cv2.countNonZero(edges)))
+            _attest_log(logger.debug, "edges_nonzero=%d", int(cv2.countNonZero(edges)))
         ys, xs = np.nonzero(edges)
         domain = np.empty((ys.size, 1, 3), dtype=np.uint8)
         try:
@@ -266,14 +290,14 @@ def extract(
         raise ValueError("cover image and carrier image are identical")
     if key is None:
         key = DEFAULT_KEY
-    logger.info("extract cover_shape=%s", cover_img.shape)
+    _attest_log(logger.info, "cover_shape=%s", cover_img.shape)
     gray = cv2.cvtColor(cover_img, cv2.COLOR_BGR2GRAY)
     ignored = np.zeros(gray.shape, dtype=bool)
 
     def get_idx(count: int):
         edges = adaptive_canny(gray, count) & ~ignored
         if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("extract edges_nonzero=%d", int(cv2.countNonZero(edges)))
+            _attest_log(logger.debug, "edges_nonzero=%d", int(cv2.countNonZero(edges)))
         ys, xs = np.nonzero(edges)
         domain = np.empty((ys.size, 1, 3), dtype=np.uint8)
         d0, _, d2 = henon_indices(domain, key, count)
@@ -287,6 +311,6 @@ def extract(
         raise ValueError("bad password")
     ignored[header_idx[:2]] = True
     payload_len = int.from_bytes(header_bytes, "little")
-    logger.info("extract payload_bytes=%d", payload_len)
+    _attest_log(logger.info, "payload_bytes=%d", payload_len)
     idx = get_idx(payload_len * 8)
     return np.packbits(carrier_img[idx] & 1)
