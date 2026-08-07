@@ -40,4 +40,10 @@ include = ["chaosedgesteg*"]
 
 [tool.black]
 preview = true
+skip-magic-trailing-comma = true
 target-version = ["py313"]
+
+[tool.isort]
+profile = "black"
+split_on_trailing_comma = false
+combine_as_imports = true

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import argparse
 import datetime
 import os
 import sys
@@ -13,12 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from . import LossyImageError, __name__ as prog, __version__, logger
-from .steg import embed, extract
-
-
-def _expanduser(*args: str):
-    return Path(*args).expanduser()
+from . import LossyImageError, __name__ as prog, _attest_log, embed, extract, logger
 
 
 def collect_zipfile_arr[_T: (Path, BinaryIO)](*paths: _T):
@@ -47,7 +41,7 @@ def collect_zipfile_arr[_T: (Path, BinaryIO)](*paths: _T):
                         )
         tmp.seek(0)
         arr = np.fromfile(tmp, dtype=np.uint8)
-    logger.debug("collected payload bytes=%d", int(arr.size))
+    _attest_log(logger.debug, "payload size=%d", int(arr.size))
     return arr
 
 
@@ -67,7 +61,7 @@ def dump_zipfile_arr(arr: np.ndarray[tuple[int], np.dtype[np.uint8]]):
             tmp.seek(0)
             while chunk := tmp.read(4096):
                 content.extend(chunk)
-    logger.debug("dumped payload bytes=%d is_zipfile=%s", len(content), is_zipfile)
+    _attest_log(logger.debug, "payload size=%d is_zipfile=%s", len(content), is_zipfile)
     return is_zipfile, bytes(content)
 
 
@@ -75,7 +69,7 @@ def image_from_uri(uri: str):
     parsed = urlparse(uri)
     scheme = parsed.scheme
     fname = Path(parsed.path).name
-    logger.info("loading image from uri scheme=%s", scheme or "<none>")
+    _attest_log(logger.info, "scheme=%s", scheme or "<none>")
     with NamedTemporaryFile("w+b") as tmp:
         if scheme == "file":
             path = Path.from_uri(uri)
@@ -92,8 +86,8 @@ def image_from_uri(uri: str):
         else:
             raise ValueError(f"unsupported uri scheme: {scheme!r}")
         with Image.open(tmp) as im:
-            logger.debug(
-                "opened image format=%s mode=%s size=%s", im.format, im.mode, im.size
+            _attest_log(
+                logger.debug, "format=%s mode=%s size=%s", im.format, im.mode, im.size
             )
             assert_lossless(im)
             im = im.copy()
@@ -102,8 +96,8 @@ def image_from_uri(uri: str):
 
 def open_image[AnyStr: (str, bytes)](path: AnyStr | os.PathLike[str] | BinaryIO):
     with Image.open(path) as im:
-        logger.debug(
-            "opened image format=%s mode=%s size=%s", im.format, im.mode, im.size
+        _attest_log(
+            logger.debug, "format=%s mode=%s size=%s", im.format, im.mode, im.size
         )
         assert_lossless(im)
         fname = im.filename
@@ -113,57 +107,63 @@ def open_image[AnyStr: (str, bytes)](path: AnyStr | os.PathLike[str] | BinaryIO)
 
 def assert_lossless(im: Image.Image):
     fmt = (im.format or "").upper()
-    logger.debug("assert_lossless format=%s", fmt or "<none>")
-    if fmt in {"JPEG", "JPG", "MPO"}:
-        raise LossyImageError(f"{fmt} uses lossy compression")
-    elif fmt in {"PNG", "BMP", "GIF"}:
-        pass
-    elif fmt == "WEBP" and im.info.get("lossless") is not True:
-        raise LossyImageError(f"{fmt} does not use lossless compression")
-    elif fmt == "TIFF" and getattr(im, "tag_v2", {}).get(259) not in {1, 5, 8, 32773}:
-        raise LossyImageError(f"{fmt} uses lossy or unknown compression")
-    else:
-        raise ValueError(f"unsupported format: {fmt!r}")
+    _attest_log(logger.debug, "format=%s", fmt or "<none>")
+    match fmt:
+        case "PNG" | "BMP" | "GIF":
+            return
+        case "JPEG" | "JPG" | "MPO":
+            raise LossyImageError(f"{fmt} uses lossy compression")
+        case "WEBP":
+            if im.info.get("lossless") is not True:
+                raise LossyImageError(f"{fmt} does not use lossless compression")
+        case "TIFF":
+            if getattr(im, "tag_v2", {}).get(259) not in {1, 5, 8, 32773}:
+                raise LossyImageError(f"{fmt} uses lossy or unknown compression")
+        case _:
+            raise ValueError(f"unsupported format: {fmt!r}")
 
 
-def handle_cover_image(ns: argparse.Namespace):
+def handle_cover_image(ns):
     path: str = ns.cover_img_path
     if ns.from_remote:
-        logger.info("using remote cover image %s", path)
-        im, fname = image_from_uri(path)
+        handler, origin = image_from_uri, "remote"
     else:
-        logger.info("using local cover image %s", path)
-        im, fname = open_image(path)
+        handler, origin = open_image, "local"
+    _attest_log(logger.info, "[%s]\t%s", origin, path)
+    im, fname = handler(path)
     with im.convert("RGB") as rgb:
         arr = np.array(rgb, dtype=np.uint8)
         arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
-    logger.debug("cover image shape=%s dtype=%s", arr.shape, arr.dtype)
+    _attest_log(logger.debug, "shape=%s dtype=%s", arr.shape, arr.dtype)
     return arr, fname
 
 
 def get_ces_filename(suffix: str = ""):
     fname = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
-    fname += f"_{prog}{suffix}"
+    fname += f"_{__package__}{suffix}"
     return fname
 
 
-def handle_password(ns: argparse.Namespace):
+def handle_password(ns):
     if hasattr(ns, "password"):
-        password: str = ns.password
-        logger.debug("using password from argument")
+        password: bytes = ns.password
+        _attest_log(logger.debug, "using password from argv")
         return password
     elif hasattr(ns, "password_file"):
         buf = bytearray()
         password_file: BinaryIO = ns.password_file
         while chunk := password_file.read(4096):
             buf.extend(chunk)
-        logger.debug("using password from file")
+        _attest_log(logger.debug, "using password from file")
         return bytes(buf)
-    logger.debug("no password provided")
-    return
+    elif from_env := os.environ.get("CESPASSWORD"):
+        _attest_log(logger.debug, "using password from env")
+        return from_env.encode()
+    else:
+        _attest_log(logger.debug, "no password provided")
 
 
-def handle_embed(ns: argparse.Namespace):
+def handle_embed(ns):
     arr, fname = handle_cover_image(ns)
     suffix = Path(fname).suffix
     if hasattr(ns, "outfile"):
@@ -175,14 +175,13 @@ def handle_embed(ns: argparse.Namespace):
     else:
         outfile = Path(get_ces_filename(suffix))
     payload = collect_zipfile_arr(*ns.paths)
-    logger.info("embedding payload bytes=%d into %s", int(payload.size), fname)
-    logger.debug("output file=%s cover shape=%s", outfile, arr.shape)
+    _attest_log(logger.info, "size=%d outfile=%s", int(payload.size), outfile)
     steg_arr = embed(arr, payload, key=handle_password(ns))
     cv2.imwrite(outfile, steg_arr)
     return outfile
 
 
-def handle_extract(ns: argparse.Namespace) -> Optional[Path]:
+def handle_extract(ns) -> Optional[Path]:
     arr, _ = handle_cover_image(ns)
     steg_im, _ = open_image(ns.steg_img_path)
     with steg_im.convert("RGB") as rgb:
@@ -198,20 +197,20 @@ def handle_extract(ns: argparse.Namespace) -> Optional[Path]:
                 outfile /= Path(get_ces_filename(ext))
         else:
             outfile.write(payload_buf)
-            logger.info("extracted payload bytes=%d to stdout", len(payload_buf))
+            _attest_log(logger.info, "bytes=%d; extracted to stdout", len(payload_buf))
             return
     else:
         outfile = Path.cwd() / get_ces_filename(ext)
     outfile.write_bytes(payload_buf)
-    logger.info("extracted payload bytes=%d to %s", len(payload_buf), outfile)
+    _attest_log(logger.info, "bytes=%d; extracted to %s", len(payload_buf), outfile)
     return outfile
 
 
-def handle_base(ns: argparse.Namespace):
+def handle_base(ns):
     import logging
 
-    verbosity_levels = logging.WARNING, logging.INFO, logging.DEBUG
-    verbosity = verbosity_levels[min(ns.verbosity, 2)]
+    levels = logging.WARNING, logging.INFO, logging.DEBUG
+    verbosity = levels[min(ns.verbosity, len(levels) - 1)]
 
     class _PrefixFormatter(logging.Formatter):
         def format(self, record: logging.LogRecord) -> str:
@@ -220,8 +219,7 @@ def handle_base(ns: argparse.Namespace):
 
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
-    while logger.handlers:
-        logger.handlers.pop()
+    logger.handlers.clear()
     handler = None
     debug_output: Optional[Path] = ns.debug_output
     if debug_output is not None:
@@ -236,18 +234,18 @@ def handle_base(ns: argparse.Namespace):
         isinstance(h, logging.StreamHandler) and h.stream is sys.stderr
         for h in logger.handlers
     )
-    if ns.quiet:
-        no_banner = True
-    else:
-        no_banner = ns.no_banner
-    if not no_banner:
+    if not (ns.quiet or ns.no_banner):
         from .banner import BANNER
 
         print(BANNER, file=sys.stderr)
     return log_to_stderr
 
 
-def main():
+def parse_args():
+    import argparse
+
+    from . import __version__
+
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument(
         "-v",
@@ -256,14 +254,6 @@ def main():
         action="count",
         default=0,
         help="increase verbosity level",
-    )
-    base_parser.add_argument(
-        "-o",
-        "--debug-output",
-        dest="debug_output",
-        type=_expanduser,
-        metavar="FILE",
-        help="write logs to FILE",
     )
     base_parser.add_argument(
         "-q",
@@ -278,17 +268,22 @@ def main():
         action="store_true",
         help="suppress banner output",
     )
+    base_parser.add_argument(
+        "-o",
+        "--debug-output",
+        dest="debug_output",
+        type=Path,
+        metavar="FILE",
+        help="write logs to %(metavar)s",
+    )
 
     cover_image_opts = base_parser.add_argument_group(title="cover image options")
     cover_image_opts.add_argument(
         dest="cover_img_path",
         metavar="IMG",
-        help=". ".join(
-            [
-                "path to cover image used for embed/extract",
-                "image must use a lossless format (eg., PNG, BMP)",
-            ]
-        ),
+        help="""\
+        path to cover image used for embed/extract.
+        image must use a lossless format (eg., PNG, BMP)""",
     )
     cover_image_opts.add_argument(
         "-r",
@@ -300,7 +295,7 @@ def main():
 
     password_opts = base_parser.add_argument_group(
         title="password options",
-        description="specify key to use for Hénon map parameter entropy",
+        description="specify key to use for chaotic coordinate mapping",
     )
     password_group = password_opts.add_mutually_exclusive_group()
     password_group.add_argument(
@@ -308,15 +303,13 @@ def main():
         "--password",
         dest="password",
         metavar="PASSWORD",
-        help=". ".join(
-            [
-                "plaintext string",
-                "this option is insecure and should be avoided, "
-                "as it will be visible in process listings and stuff like that",
-                "use --passwd-file instead",
-            ]
-        ),
+        type=str.encode,
         default=argparse.SUPPRESS,
+        help="""\
+        password string.
+        this option is insecure and should be avoided,
+        as it will be visible in process listings and stuff like that.
+        use '--passwd-file' instead""",
     )
     password_group.add_argument(
         "-P",
@@ -324,8 +317,8 @@ def main():
         dest="password_file",
         metavar="FILE",
         type=argparse.FileType("rb"),
-        help="read password from FILE",
         default=argparse.SUPPRESS,
+        help="read password from %(metavar)s",
     )
 
     parser = argparse.ArgumentParser(prog=prog, allow_abbrev=False)
@@ -337,80 +330,77 @@ def main():
 
     embed_subparser = cmd_subparsers.add_parser("embed", parents=[base_parser])
     embed_subparser.add_argument(
-        dest="paths",
-        type=_expanduser,
-        nargs="*",
-        metavar="FILE",
-        default=[sys.stdin.buffer],
+        dest="paths", type=Path, nargs="*", metavar="FILE", default=[sys.stdin.buffer]
     )
     embed_subparser.add_argument(
         "-O",
         "--outfile",
         dest="outfile",
-        type=_expanduser,
+        type=Path,
         metavar="FILE",
         default=argparse.SUPPRESS,
+        help="write stego image to %(metavar)s",
     )
 
     extract_subparser = cmd_subparsers.add_parser("extract", parents=[base_parser])
-    extract_subparser.add_argument(
-        dest="steg_img_path", metavar="STEG_IMG", type=_expanduser
-    )
+    extract_subparser.add_argument(dest="steg_img_path", metavar="STEG_IMG", type=Path)
+
     extract_outfile_opts = extract_subparser.add_argument_group(
         title="output options",
-        description=". ".join(
-            [
-                "specify where to write extracted payload",
-                "by default, "
-                "writes to %r, where <ext> is either %r or %r depending on the payload"
-                % (f"%Y%m%d%H%M%S_{prog}.<ext>", "bin", "zip"),
-            ]
-        ),
+        description="""\
+        specify where to write extracted payload.
+        by default, writes to %r,
+        where <ext> is either %r or %r depending on the payload"""
+        % (f"YYYYMMDDHHMMSS_{__package__}.<ext>", "bin", "zip"),
     )
     extract_outfile_group = extract_outfile_opts.add_mutually_exclusive_group()
     extract_outfile_group.add_argument(
         "--stdout",
         dest="outfile",
-        const=sys.stdout.buffer,
-        help=". ".join(
-            [
-                "write directly to stdout",
-                "warning: if payload is binary and stdout is a tty, "
-                "this will mess up your terminal",
-            ]
-        ),
         action="store_const",
+        const=sys.stdout.buffer,
         default=argparse.SUPPRESS,
+        help="""\
+        write directly to stdout.
+        warning: if payload is binary and stdout is a tty,
+        this will mess up your terminal""",
     )
     extract_outfile_group.add_argument(
         "-O",
         "--outfile",
         dest="outfile",
-        type=_expanduser,
+        type=lambda s: sys.stdout.buffer if s == "-" else Path(s),
         metavar="FILE",
-        help="write extracted payload to FILE",
         default=argparse.SUPPRESS,
+        help="write extracted payload to %(metavar)s",
     )
+    return parser.parse_args()
 
-    ns = parser.parse_args()
+
+def main():
+    ns = parse_args()
     log_to_stderr = handle_base(ns)
+    match ns.cmd:
+        case "embed":
+            handler, target = handle_embed, "stego image"
+        case "extract":
+            handler, target = handle_extract, "payload"
+        case _:
+            raise RuntimeError("unreachable")
     try:
-        if ns.cmd == "embed":
-            outfile = handle_embed(ns)
-            if not ns.quiet:
-                print(
-                    f"[\x1b[32m*\x1b[0m] stego image saved to {outfile}",
-                    file=sys.stderr,
-                )
-        elif ns.cmd == "extract":
-            outfile = handle_extract(ns)
-            if not (outfile is None or ns.quiet):
-                print(f"[\x1b[32m*\x1b[0m] payload saved to {outfile}", file=sys.stderr)
+        outfile = handler(ns)
     except Exception:
         if not log_to_stderr:
-            logger.exception("error while handling %s", ns.cmd)
+            _attest_log(logger.exception, "error while handling %r", ns.cmd)
         raise
+    else:
+        if not (outfile is None or ns.quiet):
+            print("[\x1b[32m*\x1b[0m]", f"{target} saved to {outfile}", file=sys.stderr)
 
 
 if __name__ == "__main__":
+    import signal
+
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(main())
