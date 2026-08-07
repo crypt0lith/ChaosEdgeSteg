@@ -4,17 +4,14 @@ __all__ = [
     "adaptive_canny",
     "embed",
     "extract",
-    "henon_indices",
-    "henon_params",
-    "shannon_entropy",
+    "indices_3d",
 ]
 import collections.abc as abc
-import hashlib
 import logging
 import sys
 import typing as tp
-from collections import Counter
 from functools import lru_cache
+from hashlib import blake2b
 
 import cv2
 import mpmath as mp
@@ -25,15 +22,14 @@ try:
 except ImportError:
     __version__ = "0.0.0"
 
-type ArrayBase[_ShapeT_co: tuple, _SCT: np.generic] = tp.Union[
-    np.ndarray[_ShapeT_co, np.dtype[_SCT]], np.ndarray[tuple[int, ...], np.dtype[_SCT]]
+type ShapedNDArray[_ShapeT_co: tuple[int, ...], _SCT: np.generic] = np.ndarray[
+    _ShapeT_co, np.dtype[_SCT]
 ]
-type ArrayIndices[_Dim: int] = ArrayBase[tuple[_Dim], np.int64]
-type Array3dIndex[_Dim: int] = TupleOf3[ArrayIndices[_Dim]]
-type Array3d[_SCT: np.generic] = ArrayBase[tuple[int, int, tp.Literal[3]], _SCT]
+type ArrayIndices[_Dim: int] = ShapedNDArray[tuple[_Dim], np.int64]
 type TupleOf3[_T] = tuple[_T, _T, _T]
-type SupportsEntropy = abc.Sequence[tp.Hashable]
-type GrayscaleArray = ArrayBase[tuple[int, int], np.uint8]
+type Index3d[_Dim: int] = TupleOf3[ArrayIndices[_Dim]]
+type Array3d[_SCT: np.generic] = ShapedNDArray[tuple[int, int, tp.Literal[3]], _SCT]
+type GrayscaleArray = ShapedNDArray[tuple[int, int], np.uint8]
 
 
 class LossyImageError(ValueError):
@@ -76,9 +72,14 @@ def _attest_log[**P, R](
 
 
 mp.mp.dps = 200
-K = 48
+K = 80
 S = 1 << K
 MASK64 = (1 << 64) - 1
+
+DEFAULT_KEY = b"SECRET_PASSWORD"
+MAGIC = b"CES"
+HEADER_SIZE = len(MAGIC) + 4
+PERSON = b"header", b"payload"
 
 
 def _splitmix64(x: int, /) -> int:
@@ -88,66 +89,79 @@ def _splitmix64(x: int, /) -> int:
     return (x ^ (x >> 31)) & MASK64
 
 
-def _keyhash64(key: SupportsEntropy) -> int:
-    if isinstance(key, abc.Buffer):
-        data = bytes(key)
-    else:
-        data = str(key).encode("utf-8", "surrogatepass")
-    return int.from_bytes(hashlib.blake2b(data, digest_size=8).digest(), "little")
+def _key_to_ic(key: abc.Buffer) -> TupleOf3[int]:
+    """Convert a key into initial coords inside the folded-towel basin of
+    attraction
+    """
+    h = blake2b(key, digest_size=24, person=b"key-ic").digest()
+    # divide 192-bit hash into 64-bit hash word per axis
+    wx, wy, wz = np.frombuffer(h, dtype="<u8").tolist()
+    # x-,z-extents map to [0, 1) unit square
+    # y-extent is [-0.1, 0.1)
+    x0, z0 = ((v * S) >> 64 for v in [wx, wz])
+    y0 = ((wy * (S // 5)) >> 64) - S // 10
+    return x0, y0, z0
 
 
-def shannon_entropy(seq: SupportsEntropy, /) -> mp.mpf:
-    counts = Counter(seq)
-    n = mp.mpf(len(seq))
-    ln2 = mp.log(2)
-    h = mp.mpf("0")
-    for c in counts.values():
-        p = mp.mpf(c) / n
-        h -= p * (mp.log(p) / ln2)
-    _attest_log(logger.debug, "n=%d h=%s", int(n), h)
-    return h
+def indices_3d(arr: Array3d, key: abc.Buffer, count: int):
+    """Return an array index 3-tuple for arr for count positions in chaotic
+    pseudorandom order derived from key.
 
-
-def _mp_to_fixed(x: mp.mpf, /) -> int:
-    return int(mp.nint(x * S))
-
-
-X0 = _mp_to_fixed(mp.mpf("0.123456789123"))
-Y0 = _mp_to_fixed(mp.mpf("0.362436069531"))
-
-
-def henon_params(key: SupportsEntropy) -> tuple[int, int]:
-    ent = shannon_entropy(key)
-    a = _mp_to_fixed((mp.mpf("56") - ent) / mp.mpf("40"))
-    b = _mp_to_fixed((mp.mpf("24") + ent) / mp.mpf("80"))
-    h = _keyhash64(key)
-    a += ((h & 0xFFFFFFFF) - 0x80000000) >> 16
-    b += (((h >> 32) & 0xFFFFFFFF) - 0x80000000) >> 16
-    _attest_log(logger.debug, "a=%d b=%d", a, b)
-    return a, b
-
-
-def henon_indices(arr: Array3d, key: SupportsEntropy, count: int):
+    The Rössler folded-towel map is used for the ordering, where the key hash
+    is translated into initial coordinates for the hyperchaotic attractor.
+    """
     if count < 0:
         raise ValueError("expected count to be non-negative number")
 
+    # folded-towel coefficients
+    A, B, C, D, E, F, G = (
+        int(mp.nint(mp.mpf(v) * S))  # type: ignore
+        for v in ["3.8", "0.05", "0.35", "0.1", "1.9", "3.78", "0.2"]
+    )
+
+    def step(xn, yn, zn, /):
+        q = ((yn + C) * (S - 2 * zn)) // S
+        xn1 = (A * ((xn * (S - xn)) // S)) // S - (B * q) // S
+        yn1 = (D * (((q - S) * (S - (E * xn) // S)) // S)) // S
+        zn1 = (F * ((zn * (S - zn)) // S)) // S + (G * yn) // S
+        # when xn or zn are close to 0 or 1 (within ~2% edge of unit square),
+        # the point produces an orbit which escapes to infinity. this makes
+        # bigints explode and the consumer hangs. wrap it to settle on the
+        # attractor instead.
+        #
+        # the probability of escape reaches near-zero after several steps, but
+        # a 'safe' finite upper bound is not computable, so the guard runs here
+        # instead of only during the burn-in phase.
+        if xn1.bit_length() > K or zn1.bit_length() > K:
+            xn1 %= S
+            yn1 %= S
+            zn1 %= S
+        return xn1, yn1, zn1
+
+    def fold(v, /):
+        """xor-fold a 128-bit value to 64-bit, truncated"""
+        return (v ^ (v >> 64)) & MASK64
+
+    BURN_IN = 0xFF
+
     def generate():
-        a, b = henon_params(key)
-        x, y = X0, Y0
+        x, y, z = _key_to_ic(key)
+        for _ in range(BURN_IN):
+            x, y, z = step(x, y, z)
         n = count
-        max_steps = count * 10
         steps = 0
+        max_steps = count * 10
         visited = np.zeros(arr.size, dtype=bool)
         while n > 0 and steps < max_steps:
+            x, y, z = step(x, y, z)
             steps += 1
-            x = S + y - (a * (x**2)) // (S**2)
-            y = (b * x) // S
-            z = ((x & MASK64) ^ ((y & MASK64) << 1)) & MASK64
-            idx = _splitmix64(z ^ _splitmix64(steps)) % arr.size
+            w = fold(x) ^ fold(y) ^ fold(z)
+            idx = _splitmix64(w ^ _splitmix64(steps)) % arr.size
             if visited[idx]:
                 continue
-            visited[idx] = True
-            yield idx
+            else:
+                yield idx
+                visited[idx] = True
             n -= 1
         _attest_log(
             logger.debug, "requested=%d generated=%d steps=%d", count, count - n, steps
@@ -158,9 +172,7 @@ def henon_indices(arr: Array3d, key: SupportsEntropy, count: int):
     return d0, d1, d2
 
 
-def _i_to_yxz[_Dim: int](
-    indices: ArrayIndices[_Dim], h: int, w: int
-) -> Array3dIndex[_Dim]:
+def _i_to_yxz[_Dim: int](indices: ArrayIndices[_Dim], h: int, w: int) -> Index3d[_Dim]:
     plane = h * w
     z = indices // plane
     rem = indices - z * plane
@@ -231,22 +243,25 @@ def adaptive_canny(
     return best_edges
 
 
-DEFAULT_KEY = "SECRET_PASSWORD"
-MAGIC = b"CES"
-HEADER_BITS_SIZE = (len(MAGIC) + 4) * 8
+def _whiten(size: int, key: abc.Buffer, **kwargs):
+    seed = np.frombuffer(blake2b(key, **kwargs).digest(), dtype=np.uint8)
+    # we only whiten to prevent magic bytes from being used as a plaintext
+    # oracle. 'repeating-key xor' is inert because linear ordering does not
+    # survive downstream chaotic permutation.
+    return np.resize(seed, size)
 
 
 def embed(
     img: Array3d[np.uint8],
-    payload: ArrayBase[tuple[int], np.uint8],
-    key: tp.Optional[SupportsEntropy] = None,
+    payload: ShapedNDArray[tuple[int], np.uint8],
+    key: tp.Optional[abc.Buffer] = None,
 ):
     if key is None:
         key = DEFAULT_KEY
     header = np.frombuffer(MAGIC + len(payload).to_bytes(4, "little"), dtype=np.uint8)
-    header_bits = np.unpackbits(header)
-    assert header_bits.size == HEADER_BITS_SIZE
-    payload_bits = np.unpackbits(payload)
+    assert header.size == HEADER_SIZE
+    header_bits = np.unpackbits(header ^ _whiten(header.size, key, person=PERSON[0]))
+    payload_bits = np.unpackbits(payload ^ _whiten(payload.size, key, person=PERSON[1]))
     _attest_log(logger.info, "payload_bytes=%d", int(payload.size))
     _attest_log(
         logger.debug,
@@ -266,7 +281,7 @@ def embed(
         ys, xs = np.nonzero(edges)
         domain = np.empty((ys.size, 1, 3), dtype=np.uint8)
         try:
-            d0, _, d2 = henon_indices(domain, key, count)
+            d0, _, d2 = indices_3d(domain, key, count)
         except ValueError as e:
             if "iterator too short" in str(e):
                 raise SteganographyError("payload too large for image") from e
@@ -280,7 +295,7 @@ def embed(
 def extract(
     cover_img: Array3d[np.uint8],
     carrier_img: Array3d[np.uint8],
-    key: tp.Optional[SupportsEntropy] = None,
+    key: tp.Optional[abc.Buffer] = None,
 ):
     if cover_img.shape != carrier_img.shape:
         raise ValueError(
@@ -300,11 +315,13 @@ def extract(
             _attest_log(logger.debug, "edges_nonzero=%d", int(cv2.countNonZero(edges)))
         ys, xs = np.nonzero(edges)
         domain = np.empty((ys.size, 1, 3), dtype=np.uint8)
-        d0, _, d2 = henon_indices(domain, key, count)
+        d0, _, d2 = indices_3d(domain, key, count)
         return ys[d0], xs[d0], d2
 
-    header_idx = get_idx(HEADER_BITS_SIZE)
-    header_bytes = np.packbits(carrier_img[header_idx] & 1).tobytes()
+    header_idx = get_idx(HEADER_SIZE * 8)
+    header = np.packbits(carrier_img[header_idx] & 1)
+    header ^= _whiten(header.size, key, person=PERSON[0])
+    header_bytes = header.tobytes()
     if header_bytes.startswith(MAGIC):
         header_bytes = header_bytes.removeprefix(MAGIC)
     else:
@@ -312,5 +329,7 @@ def extract(
     ignored[header_idx[:2]] = True
     payload_len = int.from_bytes(header_bytes, "little")
     _attest_log(logger.info, "payload_bytes=%d", payload_len)
-    idx = get_idx(payload_len * 8)
-    return np.packbits(carrier_img[idx] & 1)
+    payload_idx = get_idx(payload_len * 8)
+    payload = np.packbits(carrier_img[payload_idx] & 1)
+    payload ^= _whiten(payload.size, key, person=PERSON[1])
+    return payload
