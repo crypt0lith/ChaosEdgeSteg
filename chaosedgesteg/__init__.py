@@ -8,6 +8,7 @@ __all__ = [
 ]
 import collections.abc as abc
 import logging
+import os
 import sys
 import typing as tp
 from functools import lru_cache
@@ -78,7 +79,9 @@ MASK64 = (1 << 64) - 1
 
 DEFAULT_KEY = b"SECRET_PASSWORD"
 MAGIC = b"CES"
-HEADER_SIZE = len(MAGIC) + 4
+HEADER_NONCE_SIZE = blake2b.SALT_SIZE
+HEADER_LEN_SIZE = 4
+HEADER_SIZE = sum([len(MAGIC), HEADER_NONCE_SIZE, HEADER_LEN_SIZE])
 PERSON = b"header", b"payload"
 
 
@@ -260,26 +263,21 @@ def embed(
         raise SteganographyError("payload larger than cover image")
     if key is None:
         key = DEFAULT_KEY
-    header = np.frombuffer(MAGIC + len(payload).to_bytes(4, "little"), dtype=np.uint8)
+    nonce = os.urandom(HEADER_NONCE_SIZE)
+    payload_len = len(payload).to_bytes(HEADER_LEN_SIZE, "little")
+    header = np.frombuffer(MAGIC + nonce + payload_len, dtype=np.uint8)
     assert header.size == HEADER_SIZE
-    header_bits = np.unpackbits(header ^ _whiten(header.size, key, person=PERSON[0]))
-    payload_bits = np.unpackbits(payload ^ _whiten(payload.size, key, person=PERSON[1]))
-    _attest_log(logger.info, "payload_bytes=%d", int(payload.size))
-    _attest_log(
-        logger.debug,
-        "header_bits=%d payload_bits=%d image_shape=%s",
-        header_bits.size,
-        payload_bits.size,
-        img.shape,
-    )
+    header = header ^ _whiten(header.size, key, person=PERSON[0])
+    payload = payload ^ _whiten(payload.size, key, salt=nonce, person=PERSON[1])
+    _attest_log(logger.info, "payload_bytes=%d", payload.size)
     img = img.copy()
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     occupied = np.zeros(gray.shape, dtype=bool)
-    for bits in [header_bits, payload_bits]:
+    for bits in map(np.unpackbits, [header, payload]):
         count = bits.size
         edges = adaptive_canny(gray, count) & ~occupied
         if logger.isEnabledFor(logging.DEBUG):
-            _attest_log(logger.debug, "edges_nonzero=%d", int(cv2.countNonZero(edges)))
+            _attest_log(logger.debug, "edges_nonzero=%d", cv2.countNonZero(edges))
         ys, xs = np.nonzero(edges)
         domain = np.empty((ys.size, 1, 3), dtype=np.uint8)
         try:
@@ -322,16 +320,16 @@ def extract(
 
     header_idx = get_idx(HEADER_SIZE * 8)
     header = np.packbits(carrier_img[header_idx] & 1)
+    ignored[header_idx[:2]] = True
     header ^= _whiten(header.size, key, person=PERSON[0])
     header_bytes = header.tobytes()
-    if header_bytes.startswith(MAGIC):
-        header_bytes = header_bytes.removeprefix(MAGIC)
-    else:
+    if not header_bytes.startswith(MAGIC):
         raise ValueError("bad password")
-    ignored[header_idx[:2]] = True
-    payload_len = int.from_bytes(header_bytes, "little")
+    header_bytes = header_bytes.removeprefix(MAGIC)
+    nonce = header_bytes[:HEADER_NONCE_SIZE]
+    payload_len = int.from_bytes(header_bytes[-HEADER_LEN_SIZE:], "little")
     _attest_log(logger.info, "payload_bytes=%d", payload_len)
     payload_idx = get_idx(payload_len * 8)
     payload = np.packbits(carrier_img[payload_idx] & 1)
-    payload ^= _whiten(payload.size, key, person=PERSON[1])
+    payload ^= _whiten(payload.size, key, salt=nonce, person=PERSON[1])
     return payload
