@@ -159,9 +159,8 @@ def indices_3d(arr: Array3d, key: abc.Buffer, count: int):
             idx = _splitmix64(w ^ _splitmix64(steps)) % arr.size
             if visited[idx]:
                 continue
-            else:
-                yield idx
-                visited[idx] = True
+            yield idx
+            visited[idx] = True
             n -= 1
         _attest_log(
             logger.debug, "requested=%d generated=%d steps=%d", count, count - n, steps
@@ -256,6 +255,8 @@ def embed(
     payload: ShapedNDArray[tuple[int], np.uint8],
     key: tp.Optional[abc.Buffer] = None,
 ):
+    if payload.size > img.size:
+        raise SteganographyError("payload larger than cover image")
     if key is None:
         key = DEFAULT_KEY
     header = np.frombuffer(MAGIC + len(payload).to_bytes(4, "little"), dtype=np.uint8)
