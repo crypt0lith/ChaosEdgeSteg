@@ -242,11 +242,12 @@ def adaptive_canny(
     return best_edges
 
 
-def _whiten(size: int, key: abc.Buffer, **kwargs):
+def _whiten(size: int, key: abc.Buffer, /, **kwargs):
     seed = np.frombuffer(blake2b(key, **kwargs).digest(), dtype=np.uint8)
     # we only whiten to prevent magic bytes from being used as a plaintext
     # oracle. 'repeating-key xor' is inert because linear ordering does not
-    # survive downstream chaotic permutation.
+    # survive downstream chaotic permutation. treat as not exploitable
+    # until proven otherwise.
     return np.resize(seed, size)
 
 
