@@ -191,49 +191,44 @@ def adaptive_canny(
     niter=10,
     tol: tp.Optional[float] = None,
 ) -> GrayscaleArray:
-    if arr.dtype != np.uint8:
-        raise ValueError("expected uint8")
+    arr = np.asarray(arr, dtype=np.uint8)
+    target_density = min(max(1.0 - (count / arr.size), 0.0), 1.0)
+    bounds = np.asarray([lo, hi], dtype=np.uint8).astype(np.float32)
     if tol is None:
         tol = 1.0 / arr.size
-    lmin, lmax = (max(int(x), 0) & 0xFF for x in lo)
-    hmin, hmax = (max(int(x), 0) & 0xFF for x in hi)
-    target_density = count / arr.size
-    target_edge_density = min(max(1.0 - target_density, 0.0), 1.0)
     _attest_log(
         logger.debug,
         "target_edge_density=%.6f count=%d size=%d",
-        target_edge_density,
+        target_density,
         count,
         arr.size,
     )
     filtered = cv2.bilateralFilter(arr, d=9, sigmaColor=75, sigmaSpace=75)
-    lo_t = 0.0
-    hi_t = 1.0
+    t_lo, t_hi = 0.0, 1.0
     best_err = best_edges = None
     prev_lower = prev_upper = None
     reason = None
     for _ in range(niter):
-        t = (lo_t + hi_t) * 0.5
-        lower = int(round(lmin + t * (lmax - lmin)))
-        upper = int(round(hmin + t * (hmax - hmin)))
+        t = (t_lo + t_hi) / 2
+        lower, upper = bounds[:, 0] + t * (bounds[:, 1] - bounds[:, 0])
         if lower > upper:
             lower, upper = upper, lower
         if best_edges is not None and (lower, upper) == (prev_lower, prev_upper):
             reason = "thresholds stable"
             break
-        prev_lower, prev_upper = lower, upper
         edges = cv2.Canny(filtered, lower, upper)
-        edge_density = cv2.countNonZero(edges) / arr.size
-        err = abs(edge_density - target_edge_density)
+        density = cv2.countNonZero(edges) / arr.size
+        err = abs(density - target_density)
         if best_err is None or err < best_err:
             best_err, best_edges = err, edges
+        prev_lower, prev_upper = lower, upper
         if err <= tol:
             reason = "tolerance met"
             break
-        if edge_density > target_edge_density:
-            lo_t = t
+        if density > target_density:
+            t_lo = t
         else:
-            hi_t = t
+            t_hi = t
     _attest_log(
         logger.debug,
         "result lower=%d upper=%d err=%.6f reason=%r",
@@ -242,6 +237,7 @@ def adaptive_canny(
         best_err if best_err is not None else -1.0,
         reason or "max iter reached",
     )
+    assert best_edges is not None
     return best_edges
 
 
