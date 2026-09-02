@@ -1,13 +1,21 @@
 __all__ = [
     "Header",
     "LossyImageError",
+    "Payload",
+    "PayloadKind",
     "SteganographyError",
     "adaptive_canny",
+    "dump_pyfile",
     "embed",
     "extract",
     "indices_3d",
+    "loads_pycode",
+    "loads_pyfile",
+    "make_zipfile_arr",
 ]
+import ast
 import collections.abc as abc
+import enum
 import logging
 import os
 import struct
@@ -15,6 +23,8 @@ import sys
 import typing as tp
 from functools import lru_cache
 from hashlib import blake2b
+from pathlib import Path
+from types import CodeType
 
 import cv2
 import mpmath as mp
@@ -83,7 +93,7 @@ DEFAULT_KEY = b"SECRET_PASSWORD"
 
 MAGIC = b"CES"
 HEADER_NONCE_SIZE = blake2b.SALT_SIZE
-Header = struct.Struct(f"<{len(MAGIC)}s{HEADER_NONCE_SIZE}sI")
+Header = struct.Struct(f"<{len(MAGIC)}s{HEADER_NONCE_SIZE}sBI")
 
 PERSON = b"header", b"payload"
 
@@ -253,9 +263,22 @@ def _whiten(size: int, key: abc.Buffer, /, **kwargs):
     return np.resize(seed, size)
 
 
+class PayloadKind(enum.IntEnum):
+    RAW = enum.auto()
+    PYCODE = enum.auto()
+    PYFILE = enum.auto()
+    ZIPFILE = enum.auto()
+
+
+class Payload(tp.NamedTuple):
+    data: ShapedNDArray[tuple[int], np.uint8]
+    kind: PayloadKind
+
+
 def embed(
     img: Array3d[np.uint8],
     payload: ShapedNDArray[tuple[int], np.uint8],
+    kind: int,
     key: tp.Optional[abc.Buffer] = None,
 ):
     if payload.size > img.size:
@@ -263,7 +286,9 @@ def embed(
     if key is None:
         key = DEFAULT_KEY
     nonce = os.urandom(HEADER_NONCE_SIZE)
-    header = np.frombuffer(Header.pack(MAGIC, nonce, len(payload)), dtype=np.uint8)
+    header = np.frombuffer(
+        Header.pack(MAGIC, nonce, PayloadKind(kind), len(payload)), dtype=np.uint8
+    )
     header = header ^ _whiten(header.size, key, person=PERSON[0])
     payload = payload ^ _whiten(payload.size, key, salt=nonce, person=PERSON[1])
     _attest_log(logger.info, "payload_bytes=%d", payload.size)
@@ -318,7 +343,7 @@ def extract(
     header_idx = get_idx(Header.size * 8)
     header = np.packbits(carrier_img[header_idx] & 1)
     header ^= _whiten(header.size, key, person=PERSON[0])
-    magic, nonce, payload_len = Header.unpack(header.tobytes())
+    magic, nonce, kind, payload_len = Header.unpack(header.tobytes())
     if magic != MAGIC:
         raise ValueError("bad password")
     _attest_log(logger.info, "payload_bytes=%d", payload_len)
@@ -326,4 +351,68 @@ def extract(
     payload_idx = get_idx(payload_len * 8)
     payload = np.packbits(carrier_img[payload_idx] & 1)
     payload ^= _whiten(payload.size, key, salt=nonce, person=PERSON[1])
-    return payload
+    return Payload(payload, PayloadKind(kind))
+
+
+def _get_pycode_info(metadata: bytes):
+    magic, bit_field, word = struct.unpack("<4sIQ", metadata)
+    out = {"magic": magic, "bit_field": bit_field}
+    if not (bit_field & 1):
+        import datetime
+
+        out["mtime"] = datetime.datetime.fromtimestamp(
+            word & 0xFFFFFFFF, datetime.timezone.utc
+        )
+        out["src_size"] = word >> 32
+    else:
+        out["hash"] = word
+    return out
+
+
+def loads_pycode(buf: bytes) -> CodeType:
+    import importlib.util
+    import marshal
+
+    info = _get_pycode_info(buf[:16])
+    if info["magic"] != importlib.util.MAGIC_NUMBER:
+        magic = int.from_bytes(info["magic"][:2], "little")
+        raise ValueError(f"compiled on incompatible python version (magic: {magic})")
+    return marshal.loads(buf[16:], allow_code=True)
+
+
+def loads_pyfile(buf: bytes) -> CodeType:
+    node = ast.parse(buf, mode="exec")
+    node = ast.fix_missing_locations(node)
+    return compile(node, filename="<unknown>", mode="exec")
+
+
+def dump_pyfile(file: tp.BinaryIO) -> bytes:
+    node = ast.parse(file.read(), mode="exec")
+    node = ast.fix_missing_locations(node)
+    return ast.unparse(node).encode()
+
+
+def make_zipfile_arr(*paths: Path):
+    from tempfile import NamedTemporaryFile
+    from zipfile import ZipFile
+
+    with NamedTemporaryFile("w+b") as tmp:
+        with ZipFile(tmp, "w") as zf:
+            for path in paths:
+                if path.is_file():
+                    zf.write(path, arcname=path.name)
+                elif path.is_dir():
+                    for child in path.rglob("*"):
+                        if child.is_dir():
+                            continue
+                        zf.write(child, arcname=child.relative_to(path.parent))
+                else:
+                    from errno import ENOENT
+
+                    raise FileNotFoundError(
+                        ENOENT, "no such file or directory", os.fspath(path)
+                    )
+        tmp.seek(0)
+        arr = np.fromfile(tmp, dtype=np.uint8)
+    _attest_log(logger.debug, "payload size=%d", arr.size)
+    return arr

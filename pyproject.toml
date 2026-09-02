@@ -18,6 +18,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "charset-normalizer",
     "mpmath",
     "numpy",
     "opencv-python",

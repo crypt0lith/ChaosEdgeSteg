@@ -1,68 +1,23 @@
 #!/usr/bin/env python3
+import collections.abc as abc
 import datetime
+import enum
+import functools as ft
 import os
+import signal
 import sys
+import zipfile
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import BinaryIO, Optional
 from urllib.parse import urlparse
-from zipfile import ZipFile
 
 import cv2
 import numpy as np
 from PIL import Image
 
-from . import LossyImageError, __name__ as prog, _attest_log, embed, extract, logger
-
-
-def collect_zipfile_arr[_T: (Path, BinaryIO)](*paths: _T):
-    with NamedTemporaryFile("w+b") as tmp:
-        with ZipFile(tmp, "w") as zf:
-            if len(paths) == 1 and not isinstance((fd := paths[0]), Path):
-                zf.comment = b"0"
-                with zf.open("0.bin", "w") as f:
-                    while chunk := fd.read(4096):
-                        f.write(chunk)
-            else:
-                for path in paths:
-                    assert isinstance(path, Path)
-                    if path.is_file():
-                        zf.write(path, arcname=path.name)
-                    elif path.is_dir():
-                        for child in path.rglob("*"):
-                            if child.is_dir():
-                                continue
-                            zf.write(child, arcname=child.relative_to(path.parent))
-                    else:
-                        from errno import ENOENT
-
-                        raise FileNotFoundError(
-                            ENOENT, "no such file or directory", os.fspath(path)
-                        )
-        tmp.seek(0)
-        arr = np.fromfile(tmp, dtype=np.uint8)
-    _attest_log(logger.debug, "payload size=%d", int(arr.size))
-    return arr
-
-
-def dump_zipfile_arr(arr: np.ndarray[tuple[int], np.dtype[np.uint8]]):
-    with NamedTemporaryFile("w+b") as tmp:
-        arr.tofile(tmp)
-        tmp.seek(0)
-        content = bytearray()
-        is_zipfile = False
-        with ZipFile(tmp, "r") as zf:
-            if zf.comment == b"0":
-                assert zf.namelist() == ["0.bin"]
-                content.extend(zf.read("0.bin"))
-            else:
-                is_zipfile = True
-        if is_zipfile:
-            tmp.seek(0)
-            while chunk := tmp.read(4096):
-                content.extend(chunk)
-    _attest_log(logger.debug, "payload size=%d is_zipfile=%s", len(content), is_zipfile)
-    return is_zipfile, bytes(content)
+from . import *
+from . import __name__ as prog, _attest_log, logger
 
 
 def image_from_uri(uri: str):
@@ -165,6 +120,7 @@ def handle_password(ns):
 
 def handle_embed(ns):
     arr, fname = handle_cover_image(ns)
+    assert isinstance(fname, str)
     suffix = Path(fname).suffix
     if hasattr(ns, "outfile"):
         outfile: Path = ns.outfile
@@ -174,35 +130,176 @@ def handle_embed(ns):
             outfile = outfile.with_suffix(suffix)
     else:
         outfile = Path(get_ces_filename(suffix))
-    payload = collect_zipfile_arr(*ns.paths)
-    _attest_log(logger.info, "size=%d outfile=%s", int(payload.size), outfile)
-    steg_arr = embed(arr, payload, key=handle_password(ns))
+    if hasattr(ns, "from_raw"):
+        kind = PayloadKind.RAW
+        if ns.from_raw.seekable():
+            payload = np.fromfile(ns.from_raw, dtype=np.uint8)
+        else:
+            payload = np.frombuffer(ns.from_raw.read(), dtype=np.uint8)
+    elif hasattr(ns, "from_pycode"):
+        kind = PayloadKind.PYCODE
+        if ns.from_pycode.seekable():
+            payload = np.fromfile(ns.from_pycode, dtype=np.uint8)
+        else:
+            payload = np.frombuffer(ns.from_pycode.read(), dtype=np.uint8)
+    elif hasattr(ns, "from_pyfile"):
+        kind = PayloadKind.PYFILE
+        payload = np.frombuffer(dump_pyfile(ns.from_pyfile), dtype=np.uint8)
+    elif hasattr(ns, "from_files"):
+        kind = PayloadKind.ZIPFILE
+        payload = make_zipfile_arr(*ns.from_files)
+    else:
+        raise RuntimeError("unreachable")
+    _attest_log(logger.info, "size=%d outfile=%s", payload.size, outfile)
+    steg_arr = embed(arr, payload, kind, key=handle_password(ns))
     cv2.imwrite(outfile, steg_arr)
     return outfile
 
 
+def _zipinfo(infos: abc.Sequence[zipfile.ZipInfo]):
+    import stat
+
+    HOSTS = (
+        "fat", "ami", "vms", "unx", "cms", "atr", "hpf", "mac", "zzz", "cpm",
+        "ntf", "mvs", "vse", "acn", "vft", "ats", "bos", "tan", "440", "osx",
+    )   # fmt: skip
+    out = []
+    size_u = size_c = 0
+    for info in infos:
+        if mode := info.external_attr >> 16:
+            perms = stat.filemode(mode)
+        else:
+            dos = info.external_attr & 0xFF
+            perms = ("d" if dos & 0x10 else "-") + (
+                ("r" + ("-" if dos & 0x01 else "w") + "-") * 3
+            )
+        ver = "%d.%d" % (info.create_version // 10, info.create_version % 10)
+        host = HOSTS[info.create_system] if info.create_system < len(HOSTS) else "???"
+        attrs = "bt"[info.internal_attr & 1] + "-x"[bool(info.extra)]
+        m = info.compress_type
+        if m == zipfile.ZIP_DEFLATED:
+            b1, b2 = ((info.flag_bits >> i) & 1 for i in [1, 2])
+            meth = "def" + ["NX", "FS"][b2][b1]
+        else:
+            meth = {
+                zipfile.ZIP_STORED: "stor",
+                zipfile.ZIP_BZIP2: "bzp2",
+                zipfile.ZIP_LZMA: "lzma",
+            }.get(m, "u%03d" % m)
+        if info.flag_bits:
+            meth = meth[0].upper() + meth[1:]
+        date = datetime.datetime(*info.date_time).strftime("%y-%b-%d %H:%M")
+        line = "%-10s  %3s %s %8d %s %s %s %s"
+        line %= perms, ver, host, info.file_size, attrs, meth, date, info.filename
+        out.append(line)
+        size_u += info.file_size
+        size_c += info.compress_size
+    ratio = 0.0 if size_u == 0 else (size_u - size_c) / size_u * 100
+    out.append(
+        f"{len(infos)} files, "
+        f"{size_u} bytes uncompressed, "
+        f"{size_c} bytes compressed: "
+        f"{ratio:.1%}"
+    )
+    return out
+
+
+class _ExtractFlag(enum.IntFlag):
+    YES = enum.auto()
+    EXEC = enum.auto()
+    INSPECT = enum.auto()
+
+
 def handle_extract(ns) -> Optional[Path]:
     arr, _ = handle_cover_image(ns)
-    steg_im, _ = open_image(ns.steg_img_path)
+    steg_im, fname = open_image(ns.steg_img_path)
+    flags = ft.reduce(lambda i, j: i | j, ns._flags, 0)
+
+    def prompt(msg: str, /):
+        if flags & _ExtractFlag.YES:
+            return True
+        while True:
+            answer = input(f"{msg}? (y/N) ").strip().casefold()
+            try:
+                if answer in {"y", "yes"}:
+                    return True
+                if answer in {"n", "no"}:
+                    return False
+            finally:
+                print("\x1b[A\r\x1b[2K", end="")
+            print(
+                "invalid answer%s." % ("" if len(answer) > 10 else f" {answer!r}"),
+                "please enter 'yes' or 'no'",
+                file=sys.stderr,
+            )
+
     with steg_im.convert("RGB") as rgb:
         steg_arr = np.array(rgb, dtype=np.uint8)
         steg_arr = cv2.cvtColor(steg_arr, cv2.COLOR_RGB2BGR)
     payload = extract(arr, steg_arr, key=handle_password(ns))
-    is_zipfile, payload_buf = dump_zipfile_arr(payload)
-    ext = ".zip" if is_zipfile else ".bin"
-    if hasattr(ns, "outfile"):
-        outfile: Path | BinaryIO = ns.outfile
-        if isinstance(outfile, Path):
-            if outfile.is_dir():
-                outfile /= Path(get_ces_filename(ext))
+    payload_buf = payload.data.tobytes()
+    ask_exec = None
+    match payload.kind:
+        case PayloadKind.RAW:
+            ext = ".bin"
+        case PayloadKind.PYCODE:
+            ext = ".pyc"
+            ask_exec = loads_pycode
+        case PayloadKind.PYFILE:
+            ext = ".py"
+            ask_exec = loads_pyfile
+        case PayloadKind.ZIPFILE:
+            ext = ".zip"
+    if flags & _ExtractFlag.INSPECT:
+        if payload.kind == PayloadKind.ZIPFILE:
+            from io import BytesIO
+
+            file = BytesIO(payload_buf)
+            with zipfile.ZipFile(file) as zf:
+                infos = zf.infolist()
+                lines = [
+                    f"Zip file size: {payload.data.size} bytes, "
+                    f"number of entries: {len(infos)}"
+                ]
+                lines.extend(_zipinfo(infos))
+            print(*lines, sep="\n")
+        elif payload.kind == PayloadKind.RAW:
+            import charset_normalizer
+
+            guess = charset_normalizer.from_bytes(payload_buf).best()
+            print(
+                "Raw file",
+                (f"{guess.encoding} text" if guess else "binary content"),
+                sep=", ",
+            )
         else:
+            print(
+                "Python",
+                ("source code" if payload.kind == PayloadKind.PYFILE else "bytecode"),
+            )
+        if not prompt("Proceed"):
+            return
+    if ask_exec is not None and (
+        (flags & _ExtractFlag.EXEC) or prompt("Execute embedded python code")
+    ):
+        return exec(ask_exec(payload_buf), {})
+    if isinstance(fname, (bytes, bytearray)):
+        fname = fname.decode()
+    if hasattr(ns, "outfile"):
+        outfile = ns.outfile
+        if not isinstance(outfile, Path):
             outfile.write(payload_buf)
             _attest_log(logger.info, "bytes=%d; extracted to stdout", len(payload_buf))
             return
     else:
-        outfile = Path.cwd() / get_ces_filename(ext)
-    outfile.write_bytes(payload_buf)
-    _attest_log(logger.info, "bytes=%d; extracted to %s", len(payload_buf), outfile)
+        outfile = Path.cwd()
+    if outfile.is_dir():
+        if (from_fname := outfile / (Path(fname).stem + ext)).exists():
+            outfile /= get_ces_filename(ext)
+        else:
+            outfile = from_fname
+    count = outfile.write_bytes(payload_buf)
+    _attest_log(logger.info, "bytes=%d; extracted to %s", count, outfile)
     return outfile
 
 
@@ -329,9 +426,37 @@ def parse_args():
     cmd_subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     embed_subparser = cmd_subparsers.add_parser("embed", parents=[base_parser])
-    embed_subparser.add_argument(
-        dest="paths", type=Path, nargs="*", metavar="FILE", default=[sys.stdin.buffer]
+
+    infile_group = embed_subparser.add_mutually_exclusive_group(required=True)
+    infile_group.add_argument(
+        "--raw",
+        dest="from_raw",
+        type=argparse.FileType("rb"),
+        metavar="FILE",
+        default=argparse.SUPPRESS,
     )
+    infile_group.add_argument(
+        "--py",
+        dest="from_pyfile",
+        type=argparse.FileType("rb"),
+        metavar="PYFILE",
+        default=argparse.SUPPRESS,
+    )
+    infile_group.add_argument(
+        "--pyc",
+        dest="from_pycode",
+        type=argparse.FileType("rb"),
+        metavar="PYCODE",
+        default=argparse.SUPPRESS,
+    )
+    infile_group.add_argument(
+        dest="from_files",
+        type=Path,
+        nargs="*",
+        metavar="FILE",
+        default=argparse.SUPPRESS,
+    )
+
     embed_subparser.add_argument(
         "-O",
         "--outfile",
@@ -343,18 +468,25 @@ def parse_args():
     )
 
     extract_subparser = cmd_subparsers.add_parser("extract", parents=[base_parser])
+    extract_subparser.set_defaults(_flags=[])
     extract_subparser.add_argument(dest="steg_img_path", metavar="STEG_IMG", type=Path)
 
-    extract_outfile_opts = extract_subparser.add_argument_group(
-        title="output options",
-        description="""\
-        specify where to write extracted payload.
-        by default, writes to %r,
-        where <ext> is either %r or %r depending on the payload"""
-        % (f"YYYYMMDDHHMMSS_{__package__}.<ext>", "bin", "zip"),
+    extract_subparser.add_argument(
+        "-y", "--yes", dest="_flags", action="append_const", const=_ExtractFlag.YES
     )
-    extract_outfile_group = extract_outfile_opts.add_mutually_exclusive_group()
-    extract_outfile_group.add_argument(
+    extract_subparser.add_argument(
+        "--exec", dest="_flags", action="append_const", const=_ExtractFlag.EXEC
+    )
+    extract_subparser.add_argument(
+        "--inspect", dest="_flags", action="append_const", const=_ExtractFlag.INSPECT
+    )
+
+    output_opts = extract_subparser.add_argument_group(
+        title="output options",
+        description="specify what to do with the extracted payload",
+    )
+    output_group = output_opts.add_mutually_exclusive_group()
+    output_group.add_argument(
         "--stdout",
         dest="outfile",
         action="store_const",
@@ -365,7 +497,7 @@ def parse_args():
         warning: if payload is binary and stdout is a tty,
         this will mess up your terminal""",
     )
-    extract_outfile_group.add_argument(
+    output_group.add_argument(
         "-O",
         "--outfile",
         dest="outfile",
@@ -393,14 +525,16 @@ def main():
         if not log_to_stderr:
             _attest_log(logger.exception, "error while handling %r", ns.cmd)
         raise
+    except KeyboardInterrupt:
+        if not ns.quiet:
+            print("\nexiting...", file=sys.stderr)
+        return 128 + signal.SIGINT
     else:
         if not (outfile is None or ns.quiet):
             print("[\x1b[32m*\x1b[0m]", f"{target} saved to {outfile}", file=sys.stderr)
 
 
 if __name__ == "__main__":
-    import signal
-
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(main())
