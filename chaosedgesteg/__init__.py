@@ -1,4 +1,5 @@
 __all__ = [
+    "Header",
     "LossyImageError",
     "SteganographyError",
     "adaptive_canny",
@@ -9,6 +10,7 @@ __all__ = [
 import collections.abc as abc
 import logging
 import os
+import struct
 import sys
 import typing as tp
 from functools import lru_cache
@@ -78,10 +80,11 @@ S = 1 << K
 MASK64 = (1 << 64) - 1
 
 DEFAULT_KEY = b"SECRET_PASSWORD"
+
 MAGIC = b"CES"
 HEADER_NONCE_SIZE = blake2b.SALT_SIZE
-HEADER_LEN_SIZE = 4
-HEADER_SIZE = sum([len(MAGIC), HEADER_NONCE_SIZE, HEADER_LEN_SIZE])
+Header = struct.Struct(f"<{len(MAGIC)}s{HEADER_NONCE_SIZE}sI")
+
 PERSON = b"header", b"payload"
 
 
@@ -98,7 +101,7 @@ def _key_to_ic(key: abc.Buffer) -> TupleOf3[int]:
     """
     h = blake2b(key, digest_size=24, person=b"key-ic").digest()
     # divide 192-bit hash into 64-bit hash word per axis
-    wx, wy, wz = np.frombuffer(h, dtype="<u8").tolist()
+    wx, wy, wz = struct.unpack("<3Q", h)
     # x-,z-extents map to [0, 1) unit square
     # y-extent is [-0.1, 0.1)
     x0, z0 = ((v * S) >> 64 for v in [wx, wz])
@@ -260,9 +263,7 @@ def embed(
     if key is None:
         key = DEFAULT_KEY
     nonce = os.urandom(HEADER_NONCE_SIZE)
-    payload_len = len(payload).to_bytes(HEADER_LEN_SIZE, "little")
-    header = np.frombuffer(MAGIC + nonce + payload_len, dtype=np.uint8)
-    assert header.size == HEADER_SIZE
+    header = np.frombuffer(Header.pack(MAGIC, nonce, len(payload)), dtype=np.uint8)
     header = header ^ _whiten(header.size, key, person=PERSON[0])
     payload = payload ^ _whiten(payload.size, key, salt=nonce, person=PERSON[1])
     _attest_log(logger.info, "payload_bytes=%d", payload.size)
@@ -314,17 +315,14 @@ def extract(
         d0, _, d2 = indices_3d(domain, key, count)
         return ys[d0], xs[d0], d2
 
-    header_idx = get_idx(HEADER_SIZE * 8)
+    header_idx = get_idx(Header.size * 8)
     header = np.packbits(carrier_img[header_idx] & 1)
-    ignored[header_idx[:2]] = True
     header ^= _whiten(header.size, key, person=PERSON[0])
-    header_bytes = header.tobytes()
-    if not header_bytes.startswith(MAGIC):
+    magic, nonce, payload_len = Header.unpack(header.tobytes())
+    if magic != MAGIC:
         raise ValueError("bad password")
-    header_bytes = header_bytes.removeprefix(MAGIC)
-    nonce = header_bytes[:HEADER_NONCE_SIZE]
-    payload_len = int.from_bytes(header_bytes[-HEADER_LEN_SIZE:], "little")
     _attest_log(logger.info, "payload_bytes=%d", payload_len)
+    ignored[header_idx[:2]] = True
     payload_idx = get_idx(payload_len * 8)
     payload = np.packbits(carrier_img[payload_idx] & 1)
     payload ^= _whiten(payload.size, key, salt=nonce, person=PERSON[1])
