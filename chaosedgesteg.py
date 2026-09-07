@@ -540,9 +540,8 @@ def handle_cover_image(ns):
 
 
 def get_ces_filename(suffix: str = ""):
-    fname = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
-    fname += f"_{__package__}{suffix}"
-    return fname
+    now = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
+    return f"{now}_{__name__}{suffix}"
 
 
 def handle_password(ns):
