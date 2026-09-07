@@ -1,12 +1,12 @@
 [build-system]
-requires = ["setuptools", "setuptools_scm"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "chaosedgesteg"
-dynamic = ["version"]
+version = "0.5.0"
 requires-python = ">=3.12"
-description = "chaos-based edge adaptive steganography tool"
+description = "Chaos-based edge adaptive steganography tool"
 readme = "README.md"
 keywords = ["steganography", "cli"]
 authors = [{ name = "crypt0lith" }]
@@ -27,22 +27,15 @@ dependencies = [
 ]
 
 [project.urls]
-repository = "https://github.com/crypt0lith/ChaosEdgeSteg.git"
+Homepage = "https://github.com/crypt0lith/ChaosEdgeSteg"
 
 [project.scripts]
-chaosedgesteg = "chaosedgesteg.__main__:main"
-
-[tool.setuptools_scm]
-write_to = "chaosedgesteg/_version.py"
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["chaosedgesteg*"]
+chaosedgesteg = "chaosedgesteg:main"
 
 [tool.black]
 preview = true
 skip-magic-trailing-comma = true
-target-version = ["py313"]
+target-version = ["py312"]
 
 [tool.isort]
 profile = "black"
