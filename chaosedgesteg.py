@@ -542,7 +542,7 @@ def handle_cover_image(ns):
 
 def get_ces_filename(suffix: str = ""):
     now = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
-    return f"{now}_{__name__}{suffix}"
+    return f"{now}_{Path(__file__).stem}{suffix}"
 
 
 def handle_password(ns):
@@ -860,7 +860,7 @@ def parse_args():
         help="read password from %(metavar)s",
     )
 
-    parser = argparse.ArgumentParser(prog=__name__, allow_abbrev=False)
+    parser = argparse.ArgumentParser(prog=Path(__file__).stem, allow_abbrev=False)
 
     cmd_subparsers = parser.add_subparsers(dest="cmd", required=True)
 
