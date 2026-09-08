@@ -249,24 +249,19 @@ def _i_to_yxz[_Dim: int](indices: ArrayIndices[_Dim], h: int, w: int) -> Index3d
 
 def adaptive_canny(
     arr: GrayscaleArray,
-    count: int,
+    target=1.0,
+    *,
     lo=(45, 85),
     hi=(135, 255),
     niter=10,
     tol: tp.Optional[float] = None,
 ) -> GrayscaleArray:
     arr = np.asarray(arr, dtype=np.uint8)
-    target_density = min(max(1.0 - (count / arr.size), 0.0), 1.0)
+    target = min(max(target, 0.0), 1.0)
     bounds = np.asarray([lo, hi], dtype=np.uint8).astype(np.float32)
     if tol is None:
         tol = 1.0 / arr.size
-    _attest_log(
-        logger.debug,
-        "target_edge_density=%.6f count=%d size=%d",
-        target_density,
-        count,
-        arr.size,
-    )
+    _attest_log(logger.debug, "target=%.6f size=%d", target, arr.size)
     filtered = cv2.bilateralFilter(arr, d=9, sigmaColor=75, sigmaSpace=75)
     t_lo, t_hi = 0.0, 1.0
     best_err = best_edges = None
@@ -282,14 +277,14 @@ def adaptive_canny(
             break
         edges = cv2.Canny(filtered, lower, upper)
         density = cv2.countNonZero(edges) / arr.size
-        err = abs(density - target_density)
+        err = abs(density - target)
         if best_err is None or err < best_err:
             best_err, best_edges = err, edges
         prev_lower, prev_upper = lower, upper
         if err <= tol:
             reason = "tolerance met"
             break
-        if density > target_density:
+        if density > target:
             t_lo = t
         else:
             t_hi = t
@@ -346,9 +341,12 @@ def embed(
     img = img.copy()
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     occupied = np.zeros(gray.shape, dtype=bool)
-    for bits in map(np.unpackbits, [header, payload]):
+    for i, bits in enumerate(map(np.unpackbits, [header, payload])):
         count = bits.size
-        edges = adaptive_canny(gray, count) & ~occupied
+        target = 1.0
+        if i == 0:
+            target -= count / gray.size
+        edges = adaptive_canny(gray, target) & ~occupied
         if logger.isEnabledFor(logging.DEBUG):
             _attest_log(logger.debug, "edges_nonzero=%d", cv2.countNonZero(edges))
         ys, xs = np.nonzero(edges)
@@ -383,9 +381,12 @@ def extract(
     ignored = np.zeros(gray.shape, dtype=bool)
 
     def get_idx(count: int):
-        edges = adaptive_canny(gray, count) & ~ignored
+        target = 1.0
+        if not ignored.any():
+            target -= count / gray.size
+        edges = adaptive_canny(gray, target) & ~ignored
         if logger.isEnabledFor(logging.DEBUG):
-            _attest_log(logger.debug, "edges_nonzero=%d", int(cv2.countNonZero(edges)))
+            _attest_log(logger.debug, "edges_nonzero=%d", cv2.countNonZero(edges))
         ys, xs = np.nonzero(edges)
         domain = np.empty((ys.size, 1, 3), dtype=np.uint8)
         d0, _, d2 = indices_3d(domain, key, count)
