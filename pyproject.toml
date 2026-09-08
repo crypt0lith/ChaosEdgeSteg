@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=80", "setuptools-scm[simple]>=9.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "chaosedgesteg"
-version = "0.5.1"
+dynamic = ["version"]
 requires-python = ">=3.12"
 description = "Chaos-based edge adaptive steganography tool"
 readme = "README.md"
